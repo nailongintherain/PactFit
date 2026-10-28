@@ -1,0 +1,38 @@
+# 密钥与配置
+.env
+.env.*
+!.env.example
+backend/config/env.local
+
+# 数据备份（含体重与留言，属隐私数据，绝不入库）
+*-backup-*.json
+backups/
+exports/
+*.dump
+*.sql.gz
+
+# 恢复演练产物（含真实业务行，只在仓库外生成；.gitignore 不是安全扫描器，
+# 提交前仍必须用 git diff --cached 检查实际暂存内容）
+20_import.sql
+expected.json
+pactfit-actual.json
+*.csv
+*.log
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+
+# 依赖与构建（当前无构建，预留）
+node_modules/
+dist/
+.cache/
+
+# Python 编译缓存（scripts/ 下的演练脚本会生成）
+__pycache__/
+*.pyc
