@@ -1,0 +1,271 @@
+# 减脂搭子 · 后端接口契约（机器可读版）
+# 来源：web/index.html 全量静态分析，37 处调用点
+# 用途：重写后端时的验收清单；shim 实现的对照表
+version: 1
+project:
+  name: 减脂搭子
+  online: https://fit-together-44172.app.workbuddy.host
+  frontend: web/index.html
+  frontend_sha256: 667c468fee29ba721f9ef5578369ce66dc15dfa8878d613b3b29a3279f946744
+
+runtime:
+  frontend_host: WorkBuddy Sites
+  sdk:
+    cdn: https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js
+    package: "@tencent-ai/workbuddy-cloud-sdk"
+    tag: dev
+    resolved_version: 0.1.4-dev.ca27990.202610161713
+    global: WorkBuddyCloud
+    factory: createWorkBuddyCloud
+    factory_params: [endpoint, oauthRelayBaseUrl, publishableKey]
+    proprietary: true
+  cloud_service:
+    endpoint: https://fit-together-44172.app.workbuddy.host
+    identifier: publishableKey
+    identifier_prefix: wbpk_
+    database: postgresql
+    database_managed: true
+    rls: true
+    storage: unused
+    llm: unused
+  auth:
+    methods: [otp_phone, otp_email]
+    default_ui: email
+    auto_signup: true
+    session_storage: sdk_internal
+    origin_bound: true
+  oauth_relay:
+    url: https://www.workbuddy.cn/v2/as/genie-baas/oauth
+    used: false
+
+envelope:
+  success: "{ data: <any>, error: null }"
+  failure: "{ data: null, error: { message: <string> } }"
+  client_unwrap: throws when error is present
+  notes:
+    - 前端只消费 error.message，不依赖错误码
+    - 写入后续接 .select() 必须回读整行
+
+server_injected:
+  owner_id: 由服务端用当前 session 用户 id 注入，客户端传入应被忽略
+
+query_builder:
+  select: ["*"]
+  order: single column, ascending, chainable twice
+  eq: single condition
+  insert: single object
+  update: partial object
+  delete: requires eq
+  unsupported: [or, in, like, range, join, rpc_other_than_space_peek]
+
+resources:
+
+  profiles:
+    description: 成员档案，一个空间一人一行
+    operations:
+      - id: 1
+        op: select
+        order: [id]
+        line: 680
+      - id: 2
+        op: insert
+        fields: [owner_name, space_id, nickname, role, start_weight, target_weight]
+        returns: row
+        line: 1822
+      - id: 3
+        op: update
+        fields: [nickname, start_weight, target_weight]
+        where: {id: profile.id}
+        returns: row
+        line: 1517
+      - id: 4
+        op: update
+        fields: [role]
+        where: {id: profile.id}
+        returns: row
+        line: 1851
+
+  records:
+    description: 每日记录；跨组镜像产生多条同日记录
+    operations:
+      - id: 5
+        op: select
+        order: [record_date]
+        line: 703
+      - id: 6
+        op: update
+        fields: [todo_done]
+        where: {id: today.id}
+        line: 1298
+      - id: 7
+        op: insert
+        fields: [owner_name, space_id, record_date, weight, todo_done]
+        line: 1303
+      - id: 8
+        op: update
+        fields: [weight, tags, todo_done, mood, note]
+        where: {id: today.id}
+        line: 1326
+      - id: 9
+        op: insert
+        fields: [owner_name, space_id, record_date, weight, tags, todo_done, mood, note]
+        line: 1331
+      - id: 10
+        op: update
+        fields: [weight, tags, mood]
+        where: {id: existing.id}
+        line: 1358
+      - id: 11
+        op: insert
+        fields: [owner_name, space_id, record_date, weight, tags, todo_done, mood]
+        line: 1360
+      - id: 12
+        op: update
+        fields: [owner_name]
+        where: {owner_id: uid}
+        fire_and_forget: true
+        line: 1528
+
+  todos:
+    description: 空间共享的小目标
+    operations:
+      - id: 13
+        op: select
+        order: [sort, id]
+        line: 704
+      - id: 14
+        op: insert
+        fields: [owner_name, space_id, text, sort]
+        returns: row
+        line: 1535
+      - id: 15
+        op: delete
+        where: {id: todo.id}
+        line: 1543
+      - id: 16
+        op: select
+        purpose: 判断空间是否已有默认项
+        line: 1832
+      - id: 17
+        op: insert
+        purpose: 首次建空间铺默认 3 条
+        line: 1838
+
+  tags:
+    description: 空间共享的标签
+    operations:
+      - id: 18
+        op: select
+        order: [sort, id]
+        line: 705
+      - id: 19
+        op: insert
+        fields: [owner_name, space_id, text, sort]
+        returns: row
+        line: 1550
+      - id: 20
+        op: delete
+        where: {id: tag.id}
+        line: 1558
+      - id: 21
+        op: insert
+        fire_and_forget: true
+        line: 1567
+      - id: 22
+        op: select
+        purpose: 判断空间是否已有默认项
+        line: 1833
+      - id: 23
+        op: insert
+        purpose: 首次建空间铺默认 6 条
+        line: 1844
+
+  rewards:
+    description: 约定与兑现；owner_id 为立约人，promise_by 为兑现人
+    operations:
+      - id: 24
+        op: select
+        order: [id]
+        line: 706
+      - id: 25
+        op: update
+        fields: [status, redeemed_at]
+        where: {id: reward.id}
+        cross_user: true
+        line: 1386
+      - id: 26
+        op: delete
+        where: {id: reward.id}
+        line: 1393
+      - id: 27
+        op: update
+        fields: [status, achieved_at]
+        where: {id: reward.id}
+        line: 1411
+      - id: 28
+        op: insert
+        fields: [owner_name, space_id, condition_text, target_weight, prize, promise_by, status]
+        returns: row
+        line: 1595
+
+  messages:
+    description: 纯追加留言
+    operations:
+      - id: 29
+        op: insert
+        fields: [owner_name, space_id, text]
+        returns: row
+        line: 1373
+      - id: 30
+        op: select
+        order: [id]
+        line: 707
+
+auth:
+  operations:
+    - id: 31
+      method: sendOtp
+      input: {phone: string}
+      output: {verificationId: string, isExistingUser: bool}
+      line: 1637
+    - id: 32
+      method: sendOtp
+      input: {email: string}
+      output: {verificationId: string, isExistingUser: bool}
+      line: 1649
+    - id: 33
+      method: verifyOtp
+      input: {phone_or_email: string, verificationId: string, isExistingUser: bool, token: string}
+      output: {user: {id: uuid}, session: object}
+      line: 1664
+    - id: 34
+      method: signOut
+      line: 1671
+    - id: 35
+      method: getSession
+      output: {user: {id: uuid}}
+      line: 1680
+    - id: 36
+      method: getSession
+      purpose: 启动静默恢复
+      line: 1941
+
+rpc:
+  - id: 37
+    name: space_peek
+    input: {code: string}
+    output: {count: number, names: [string]}
+    security_definer: true
+    callable_before_joining: true
+    line: 1789
+    risk: 需频控与返回内容约束（见 docs/07 R6；分析仅存私有归档）
+
+business_invariants:
+  - space_id 是多组隔离的唯一键，任何读写都必须带它
+  - 一人一天一空间一条 record
+  - 前端不写 owner_id
+  - 删除 todos/tags 不校验 owner（同组可删）
+  - rewards 允许同组跨用户更新
+  - 常量: 体重范围 20-400kg；todos 文本 <=40 字；tags <=20 字；prize <=30 字
+  - 默认小目标: [喝水 2L, 晚上不吃主食, 一起走 8000 步]
+  - 默认标签: [跑步 30 分钟, 喝水 2L, 力量训练, 没吃夜宵, 步数 1w+, 戒奶茶]
