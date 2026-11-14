@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>PactFit Local Backend Smoke（仅开发联调用，非正式 UI）</title>
+<style>
+  body { font-family: -apple-system, sans-serif; max-width: 860px; margin: 24px auto; color: #222; }
+  h1 { font-size: 18px; } .hint { color: #777; font-size: 12px; }
+  #panel { border: 1px solid #ccc; padding: 12px; border-radius: 8px; margin-top: 12px; min-height: 200px; }
+  .step { padding: 4px 0; border-bottom: 1px dashed #ddd; font-size: 13px; font-family: Menlo, monospace; }
+  .ok { color: #1a7f37; } .bad { color: #c62828; } .na { color: #888; }
+</style>
+</head>
+<body>
+<h1>PactFit Local Backend Browser Smoke Test</h1>
+<p class="hint">独立开发联调页：仅加载 pactfit-local-api.js（local 模式，回环地址）。不含 WorkBuddy Cloud SDK，不注册 Service Worker，不持久化任何 token，页面只显示脱敏状态。</p>
+<div id="panel"><div class="step na">等待测试驱动…（window.__smoke）</div></div>
+<script src="./pactfit-local-api.js"></script>
+<script>
+(function () {
+  'use strict';
+  /* 计数仪表必须在 createLocalBackend 之前安装——适配层在工厂调用时捕获 fetch 引用。
+   * 仅记录 请求路径 + HTTP 状态；不记录 query/body/Authorization/OTP（脱敏要求）。 */
+  window.__fetchCount = 0;
+  window.__tokenReqCount = 0;
+  window.__fetchLog = []; /* {path, status} */
+  var origFetch = window.fetch.bind(window);
+  window.fetch = function (input, init) {
+    var u = typeof input === 'string' ? input : (input && input.url) || '';
+    var path = '';
+    try { path = new URL(u).pathname; } catch (e) { path = '(unparsable)'; }
+    if (u.indexOf('/token?grant_type=refresh_token') >= 0) { window.__tokenReqCount++; }
+    window.__fetchCount++;
+    return origFetch(input, init).then(function (res) {
+      window.__fetchLog.push({ path: path, status: res.status });
+      return res;
+    }, function (err) {
+      window.__fetchLog.push({ path: path, status: 'network-error' });
+      throw err;
+    });
+  };
+
+  var client = PactFitLocalApi.createLocalBackend({
+    mode: 'local',
+    authUrl: 'http://127.0.0.1:9999',
+    restUrl: 'http://127.0.0.1:3000'
+  });
+  window.__client = client;
+
+  var panel = document.getElementById('panel');
+  var results = {};
+  function render(name, r) {
+    results[name] = r;
+    var div = document.createElement('div');
+    div.className = 'step ' + (r.ok === true ? 'ok' : (r.ok === false ? 'bad' : 'na'));
+    div.textContent = name + ' :: ' + JSON.stringify(r);
+    panel.appendChild(div);
+  }
+  function fail(name, e) {
+    render(name, { ok: false, code: (e && e.code) || 'unknown', msg: String((e && e.message) || e).slice(0, 120) });
+  }
+  /* 只记录 HTTP 状态与业务 code，绝不记录 token/Authorization/邮件原文 */
+  var auth = client.auth, db = client.db;
+
+  var smoke = {
+    /* 0. 页面自身状态 */
+    selfCheck: function () {
+      render('selfCheck', {
+        ok: true,
+        hasCloudSdk: typeof window.cloud !== 'undefined',
+        serviceWorker: 'serviceWorker' in navigator ? (navigator.serviceWorker.controller ? 'controlled' : 'none') : 'unsupported',
+        mode: client.mode,
+        authUrl: 'http://127.0.0.1:9999',
+        restUrl: 'http://127.0.0.1:3000'
+      });
+    },
+
+    /* 1. 请求 OTP（已确认用户 → magiclink） */
+    requestOtp: function (email) {
+      return auth.requestEmailOtp(email).then(function (r) {
+        render('requestOtp', { ok: r.error === null, sent: r.error === null, error: r.error && r.error.code || null });
+      }).catch(function (e) { fail('requestOtp', e); });
+    },
+
+    /* 2. verify（token_hash 由测试驱动从 Mailpit 获取后注入，页面不显示它） */
+    verifyOtp: function (tokenHash, type) {
+      return auth.verifyEmailOtp({ type: type || 'magiclink', token_hash: tokenHash }).then(function (r) {
+        var claims = null;
+        try {
+          var part = auth.getAccessToken().split('.')[1];
+          claims = JSON.parse(decodeURIComponent(escape(atob(part.replace(/-/g, '+').replace(/_/g, '/')))));
+        } catch (e) { /* 不输出 */ }
+        render('verifyOtp', {
+          ok: r.error === null && !!auth.getUserId(),
+          userIdPrefix: auth.getUserId() ? auth.getUserId().slice(0, 8) : null,
+          jwtRole: claims ? claims.role : null,
+          jwtAud: claims ? claims.aud : null,
+          sessionOk: !!(auth.getSession().data.session)
+        });
+      }).catch(function (e) { fail('verifyOtp', e); });
+    },
+
+    /* T1 读 profiles */
+    t1Profiles: function () {
+      return db.select('profiles').then(function (r) {
+        render('T1_profiles', { ok: r.error === null && Array.isArray(r.data), rows: r.data.length });
+      }).catch(function (e) { fail('T1_profiles', e); });
+    },
+
+    /* T2 创建空间（走 RPC） */
+    t2CreateSpace: function (nickname, role, sw, tw) {
+      return client.createSpace({ nickname: nickname, role: role, startWeight: sw, targetWeight: tw }).then(function (r) {
+        render('T2_createSpace', {
+          ok: !!(r.data && r.data.ok === true && r.data.code),
+          code: r.data && r.data.ok ? r.data.code : null,
+          bizErrorCode: r.data && r.data.ok === false ? r.data.code : (r.error && r.error.code) || null
+        });
+      }).catch(function (e) { fail('T2_createSpace', e); });
+    },
+
+    /* T3 复查 profiles（RLS 只见本人） */
+    t3Profiles: function () {
+      return db.select('profiles').then(function (r) {
+        var mine = r.data.filter(function (p) { return p.owner_id === auth.getUserId(); });
+        render('T3_profiles', {
+          ok: r.error === null && r.data.length === 1 && mine.length === 1,
+          rows: r.data.length,
+          allOwnedBySelf: r.data.every(function (p) { return p.owner_id === auth.getUserId(); })
+        });
+      }).catch(function (e) { fail('T3_profiles', e); });
+    },
+
+    /* T4 写 records：故意不传 owner_id（自动注入），记录 payload 引用完整性 */
+    t4InsertRecord: function (spaceCode, payloadRef) {
+      var payload = { space_id: spaceCode, record_date: '2026-11-14', weight: 80.5, mood: 'good', note: 'H-2A smoke' };
+      payloadRef.payloadKeysBefore = Object.keys(payload);
+      return db.insert('records', payload).then(function (r) {
+        payloadRef.payloadOwnerInjectedByCaller = payload.owner_id !== undefined;
+        var row = r.data && r.data[0];
+        render('T4_insertRecord', {
+          ok: r.error === null && !!row && row.owner_id === auth.getUserId(),
+          rowId: row && row.id,
+          ownerMatchesSub: !!row && row.owner_id === auth.getUserId(),
+          callerPayloadUnchanged: payload.owner_id === undefined
+        });
+      }).catch(function (e) { fail('T4_insertRecord', e); });
+    },
+
+    /* T5 读 records：只含本人记录 */
+    t5ReadRecords: function (spaceCode) {
+      return db.select('records', { space_id: spaceCode }).then(function (r) {
+        render('T5_readRecords', {
+          ok: r.error === null && r.data.length === 1 && r.data[0].owner_id === auth.getUserId() && r.data[0].weight === 80.5,
+          rows: r.data.length,
+          allOwnedBySelf: r.data.every(function (x) { return x.owner_id === auth.getUserId(); })
+        });
+      }).catch(function (e) { fail('T5_readRecords', e); });
+    },
+
+    /* T6 伪造 owner_id：本地拒绝、零 HTTP */
+    t6ForgedOwner: function () {
+      var before = window.__fetchCount || 0;
+      return db.insert('records', {
+        owner_id: '00000000-0000-0000-0000-000000000000',
+        space_id: 'FIT-XXXXXX', record_date: '2026-11-14', weight: 1
+      }).then(function () {
+        render('T6_forgedOwner', { ok: false, reason: '伪造 owner_id 竟然未被本地拒绝' });
+      }).catch(function (e) {
+        render('T6_forgedOwner', { ok: e.code === 'owner_mismatch', code: e.code, httpRequests: (window.__fetchCount || 0) - before });
+      });
+    },
+
+    /* T7 直插 profiles：operation_forbidden、零 HTTP */
+    t7InsertProfiles: function () {
+      var before = window.__fetchCount || 0;
+      return db.insert('profiles', { nickname: 'x' }).then(function () {
+        render('T7_insertProfiles', { ok: false, reason: 'profiles 直插未被本地拒绝' });
+      }).catch(function (e) {
+        render('T7_insertProfiles', { ok: e.code === 'operation_forbidden', code: e.code, httpRequests: (window.__fetchCount || 0) - before });
+      });
+    },
+
+    /* T8 业务拒绝信封（join 不存在空间码 + 非法昵称 → invalid_nickname 先于码校验） */
+    t8BusinessReject: function () {
+      return client.joinSpace({ code: 'FIT-ZZ99ZZ', nickname: 'n'.repeat(25) }).then(function (r) {
+        render('T8_businessReject', {
+          ok: !!(r.data && r.data.ok === false && r.data.code === 'invalid_nickname'),
+          httpOkEnvelope: r.error === null,
+          bizCode: r.data && r.data.code
+        });
+      }).catch(function (e) { fail('T8_businessReject', e); });
+    },
+
+    /* T9 契约：多字段过滤 + 双级 order + 特殊字符 */
+    t9ContractQuery: function (spaceCode) {
+      return db.select('records', { space_id: spaceCode, mood: 'good & 特殊 #test ?' }, { column: 'record_date', ascending: false, then: { column: 'id', ascending: true } })
+        .then(function (r) {
+          render('T9_contractQuery', { ok: r.error === null && Array.isArray(r.data), rows: r.data.length, code: r.error && r.error.code });
+        }).catch(function (e) { fail('T9_contractQuery', e); });
+    },
+
+    /* T10 契约：PATCH 成功路径（updated 行数）与零行路径 */
+    t10Patch: function (recordId) {
+      return db.update('records', { mood: 'great' }, { id: recordId }).then(function (r1) {
+        return db.update('records', { mood: 'nope' }, { id: 99999999 }).then(function (r2) {
+          render('T10_patch', {
+            ok: r1.error === null && r1.meta.updated === 1 && r2.error === null && r2.meta.updated === 0,
+            updatedReal: r1.meta.updated,
+            updatedZeroRow: r2.meta.updated
+          });
+        });
+      }).catch(function (e) { fail('T10_patch', e); });
+    },
+
+    /* 刷新：token 变更 / role 保持 / 刷新后可查询 / refresh_token 轮换（布尔，不展示值） */
+    doRefresh: function () {
+      var oldAT = auth.getAccessToken();
+      var oldRT = auth.getSession().data.session.refresh_token;
+      return auth.refreshSession().then(function (r) {
+        return db.select('profiles').then(function (q) {
+          var claims = null;
+          try {
+            var part = auth.getAccessToken().split('.')[1];
+            claims = JSON.parse(decodeURIComponent(escape(atob(part.replace(/-/g, '+').replace(/_/g, '/')))));
+          } catch (e) { /* 不输出 */ }
+          render('refresh', {
+            ok: r.error === null && oldAT !== auth.getAccessToken() && claims.role === 'authenticated' && q.error === null,
+            tokenChanged: oldAT !== auth.getAccessToken(),
+            roleStillAuthenticated: claims ? claims.role === 'authenticated' : false,
+            refreshTokenRotated: oldRT !== auth.getSession().data.session.refresh_token,
+            queryAfterRefreshOk: q.error === null
+          });
+        });
+      }).catch(function (e) { fail('refresh', e); });
+    },
+
+    /* 并发刷新：两次调用去重为一次 /token 请求（fetch 计数器） */
+    concurrentRefresh: function () {
+      var before = window.__tokenReqCount || 0;
+      var p1 = auth.refreshSession();
+      var p2 = auth.refreshSession();
+      return Promise.all([p1, p2]).then(function (rs) {
+        render('concurrentRefresh', {
+          ok: rs.every(function (r) { return r.error === null; }) && (window.__tokenReqCount - before) === 1,
+          tokenRequests: window.__tokenReqCount - before,
+          samePromise: p1 === p2
+        });
+      }).catch(function (e) { fail('concurrentRefresh', e); });
+    },
+
+    /* 登出 */
+    doLogout: function () {
+      return auth.signOut().then(function (r) {
+        render('logout', {
+          ok: r.data.localCleared === true && auth.getAccessToken() === null,
+          localCleared: r.data.localCleared,
+          serverRevoked: r.data.serverRevoked,
+          errCode: r.error && r.error.code || null
+        });
+      }).catch(function (e) { fail('logout', e); });
+    },
+
+    /* 登出后守卫拒绝 */
+    guardAfterLogout: function () {
+      var before = window.__fetchCount || 0;
+      return db.select('profiles').then(function () {
+        render('guardAfterLogout', { ok: false, reason: '登出后竟可继续查询' });
+      }).catch(function (e) {
+        render('guardAfterLogout', { ok: e.code === 'unauthenticated', code: e.code, httpRequests: (window.__fetchCount || 0) - before });
+      });
+    },
+
+    /* 竞态：刷新在途 + 登出 → 迟到的 refresh 响应不得重建会话 */
+    raceRefreshLogout: function () {
+      var p = auth.refreshSession(); /* 在途（测试驱动会用 route 延迟 /token 响应） */
+      return auth.signOut().then(function (lo) {
+        return p.then(function (r) {
+          render('raceRefreshLogout', {
+            ok: auth.getAccessToken() === null && auth.getSession().data.session === null,
+            refreshResolved: r.error === null,
+            sessionReEstablished: auth.getSession().data.session !== null
+          });
+        });
+      }).catch(function (e) {
+        render('raceRefreshLogout', { ok: auth.getAccessToken() === null && auth.getSession().data.session === null, refreshRejected: !!(e && e.code) });
+      });
+    },
+
+    /* 解散空间（清理用，本人合法 RPC） */
+    dissolve: function (code) {
+      return client.dissolveSpace(code).then(function (r) {
+        render('dissolve', { ok: !!(r.data && r.data.ok === true), biz: r.data && r.data.code || null, errCode: r.error && r.error.code || null });
+      }).catch(function (e) { fail('dissolve', e); });
+    },
+
+    results: results
+  };
+  window.__smoke = smoke;
+
+  window.addEventListener('DOMContentLoaded', function () { smoke.selfCheck(); });
+  if (document.readyState !== 'loading') { smoke.selfCheck(); }
+})();
+</script>
+</body>
+</html>

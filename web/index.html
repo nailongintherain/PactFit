@@ -483,6 +483,9 @@ main.page{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom
     <button data-page-node-id="4OkJOVGjnhexJVkjGtD5Td" class="btn" id="btn-pair" type="button"><!--pnid:2mpp4Iy1B0G7Vx549FN8am-->开始记录</button>
     <div data-page-node-id="xXpv0DRYj4QMGS8YGfVgWb" class="err-msg" id="pair-err"></div>
   </div>
+
+  <!-- H-3-PAIR：未创建/未加入空间的已登录用户也需要能退出登录（复用 doLogout） -->
+  <button class="back-link" id="btn-pair-logout" type="button" style="margin-top:18px;align-self:center;">退出登录</button>
 </div>
 
 <!--pnid:Age42lvvv8v6b9P7fgBx8u--><!-- ======== 主应用 ======== -->
@@ -572,7 +575,44 @@ main.page{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom
 </div>
 <div data-page-node-id="2FCvI378LTrDriHnl40NLY" id="toast"></div>
 
-<script data-page-node-id="kp8EUQO5l5ZxYx3ex8FeJX" src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
+<!-- H-2B-1 后端模式判定：必须早于任何 SDK/业务脚本执行。
+     规则：仅回环主机（127.0.0.1 / localhost / ::1）+ 显式开发开关（?local=1 或
+     localStorage['pactfit_local_dev']='1'）才得到 local；公网/其他来源恒为 cloud；
+     hash 不参与判定。模式在启动时一次确定，之后不再变更。 -->
+<script data-page-node-id="pfBackendMode">
+(function(){
+  var host = (location.hostname || '').toLowerCase();
+  var loopback = (host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '[::1]');
+  var flag = false;
+  try {
+    var m = /[?&]local=([^&#]*)/.exec(location.search || '');
+    flag = !!(m && m[1] === '1') || localStorage.getItem('pactfit_local_dev') === '1';
+  } catch(e) {}
+  window.__PACTFIT_BACKEND__ = (loopback && flag) ? 'local' : 'cloud';
+  if (window.__PACTFIT_BACKEND__ === 'local') {
+    /* 只允许本机两服务地址，前端不接受任何可配置的生产地址 */
+    window.__PACTFIT_LOCAL_CFG__ = { authUrl: 'http://127.0.0.1:9999', restUrl: 'http://127.0.0.1:3000' };
+  }
+})();
+</script>
+<script data-page-node-id="pfBackendLoader">
+(function(){
+  /* 解析期同步插入，保持与原静态 script 相同的加载顺序（cloud 行为不变）。
+     local 模式不加载 Cloud SDK；cloud 模式不加载本地适配层。 */
+  function load(src){
+    var s = document.createElement('script');
+    s.src = src;
+    document.write(s.outerHTML);
+  }
+  if (window.__PACTFIT_BACKEND__ === 'local') {
+    load('./pactfit-local-api.js');
+  } else {
+    load('https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js');
+  }
+  /* 接线层两模式共用：纯逻辑、无网络、无云端请求（同源静态资源） */
+  load('./pactfit-be.js');
+})();
+</script>
 <script data-page-node-id="dTYnOKJ6s8llXvKo6Ij2Vq" data-pnid-children="JxZoX1P8ZtWZ8ejEDumIK5">
 /* =========================================================
    减脂搭子 · 前端
@@ -589,7 +629,13 @@ var PUBLIC_CONFIG = {
 var HER = 'her', HIM = 'him';
 var ROLES = { her:'我', him:'他' };
 
-var cloud = null;
+/* 后端模式（启动时已由页面头部脚本确定，之后不可变） */
+var BACKEND = (window.__PACTFIT_BACKEND__ === 'local') ? 'local' : 'cloud';
+var cloud = null;      /* cloud 模式：WorkBuddy Cloud SDK 实例；local 模式下为拒绝桩 */
+var localApi = null;   /* local 模式：PactFitLocalApi 适配层实例 */
+var LB = null;         /* local 模式：可测试接线桥 PactFitBE.createLocalBridge */
+var guard = PactFitBE.createSessionGuard();  /* 页面级会话代数：防旧异步回调复活 UI */
+var loadSeq = 0;      /* 数据加载序号：同一次登录内并发 loadAll，只允许最后发起的那次落地 */
 var uid = '';
 var S = {
   loggedIn:false,
@@ -614,6 +660,11 @@ var currentTab = 'home';
 
 /* ---------- 工具 ---------- */
 function $(id){ return document.getElementById(id); }
+/* 一次异步加载能否落地：会话代数、加载序号、发起时身份三者都必须没变。
+   只比代数不够——同一次登录里连点两个空间，先发的重响应会盖掉后发的轻响应。 */
+function loadIsLive(ep, token, who){
+  return guard.isCurrent(ep) && token === loadSeq && who === uid;
+}
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){
   return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]; }); }
 function pad(n){ return String(n).padStart(2,'0'); }
@@ -654,12 +705,22 @@ function show(id){
   $(id).classList.remove('hidden');
 }
 function tickClock(){
-  var d=new Date(); $('sb-time').textContent=d.getHours()+':'+pad(d.getMinutes());
+  var d=new Date();
+  $('sb-time').textContent = (BACKEND === 'local' ? 'LOCAL ' : '') + d.getHours()+':'+pad(d.getMinutes());
 }
 setInterval(tickClock, 20000);
 
-/* ---------- 打开 SDK ---------- */
+/* ---------- 打开后端 ---------- */
+/* local 模式下 cloud 指向 PactFitBE.createBlockedCloud() 拒绝桩：
+   任何未适配调用都明确失败，绝不静默成功、绝不回退云端（此时 SDK 未加载）。 */
 function initCloud(){
+  if (BACKEND === 'local') {
+    var cfg = window.__PACTFIT_LOCAL_CFG__ || { authUrl: 'http://127.0.0.1:9999', restUrl: 'http://127.0.0.1:3000' };
+    localApi = PactFitLocalApi.createLocalBackend({ mode: 'local', authUrl: cfg.authUrl, restUrl: cfg.restUrl });
+    LB = PactFitBE.createLocalBridge({ api: localApi });
+    cloud = PactFitBE.createBlockedCloud();
+    return;
+  }
   if (!window.WorkBuddyCloud || !WorkBuddyCloud.createWorkBuddyCloud) {
     throw new Error('SDK 加载失败');
   }
@@ -670,34 +731,87 @@ function initCloud(){
   });
 }
 
+/* local 模式的界面提示（不改布局，仅文案与输入框语义 + 状态栏标识） */
+function applyLocalModeUi(){
+  try {
+    var box = $('view-login');
+    if (box && !$('local-banner')) {
+      var d = document.createElement('div');
+      d.id = 'local-banner';
+      d.style.cssText = 'margin:0 0 12px;padding:8px 12px;border-radius:8px;background:#FFF6E5;border:1px solid #F0D9A8;color:#7A5A12;font-size:12px;line-height:1.6';
+      d.textContent = '本地开发模式（GoTrue :9999 / PostgREST :3000）：仅邮箱链接登录、创建/加入空间、体重记录可用；手机号登录、小目标、标签、奖励、留言暂不支持。';
+      box.insertBefore(d, box.firstChild);
+    }
+    var tk = $('token');
+    if (tk) {
+      tk.setAttribute('inputmode', 'text');
+      tk.setAttribute('maxlength', '512');
+      tk.setAttribute('placeholder', '粘贴邮件里的完整登录链接（含 type=signup 或 type=magiclink）');
+    }
+  } catch(e){}
+}
+
 /* ---------- 数据访问 ---------- */
 function unwrap(res){
   if (res && res.error) throw res.error;
   return res ? res.data : null;
 }
 
+/* ---------- local 模式未适配功能：统一拒绝（H-3-M3） ----------
+   规则：判定必须发生在任何 Cloud SDK / 数据库调用之前；
+        不写 S 缓存、不发请求、不自动回退云端、不拿假数据冒充已保存。
+   返回 true = 已拒绝，调用方立即 return。
+   （local 模式下 cloud 是拒绝桩，调用会抛 unsupported_in_local_mode；
+     这里提前拦住，是为了给出「为什么不行」而不是一句「添加失败」。） */
+function localUnsupported(feature){
+  if (BACKEND !== 'local') return false;
+  toast(feature + '在本地开发模式下暂不支持');
+  return true;
+}
+
+/* 已接入功能的失败分类：不让所有 catch 都退化成「操作失败」
+     unsupported_in_local_mode → 功能未接入（守卫漏掉时的兜底）
+     无 code 的网络层失败       → 结果未知，不谎称失败
+     带 code 的业务拒绝         → 用调用方给的兜底文案 */
+function actionErrText(e, fallback){
+  var code = (e && e.code) ? String(e.code) : '';
+  if (code === 'unsupported_in_local_mode') return '该功能在本地开发模式下暂不支持';
+  if (PactFitBE.classifyWriteError(e) === PactFitBE.WRITE_OUTCOME.UNKNOWN) {
+    return '网络不通，操作结果尚未确认，请刷新后查看';
+  }
+  return fallback;
+}
+
+/* 返回值约定（loadAll / loadAllLocal 一致）：
+     true  = 已加载（当前身份有空间）
+     false = 当前身份还没有任何空间（走「建空间 / 加入空间」引导）
+     null  = 本次结果作废（期间已登出或切换身份）——调用方必须单独判断，
+             绝不能把 null 当成 false 去弹「建空间」界面。
+   三个都要先看 ep/token/who：**网络请求已经发出** 和 **响应可以写回当前状态**
+   是两件事，守卫只能拦住后者，不能撤销前者。 */
 async function loadAll(){
+  if (BACKEND === 'local') return loadAllLocal();
+  var ep = guard.current(), token = ++loadSeq, who = uid;
   var pr = unwrap(await cloud.database.from('profiles').select('*').order('id')) || [];
-  S.allProfiles = pr;
-  S.myProfiles  = pr.filter(function(p){ return p.owner_id === uid; });
-  if (!S.myProfiles.length) {
-    S.profile = null; S.profiles = []; S.others = []; S.partner = null;
-    S.records = []; S.allRecords = []; S.todos = []; S.tags = []; S.rewards = []; S.messages = [];
+  if (!loadIsLive(ep, token, who)) return null;
+
+  var allProfiles = pr;
+  var myProfiles  = allProfiles.filter(function(p){ return p.owner_id === who; });
+  if (!myProfiles.length) {
+    commitNoSpace(allProfiles, []);
     return false;
   }
   // 当前空间：优先用记住的那个，失效就回到第一个
-  var ids  = S.myProfiles.map(function(p){ return p.space_id; });
+  var ids  = myProfiles.map(function(p){ return p.space_id; });
   var want = curSpaceStore();
   if (ids.indexOf(want) < 0) want = ids[0];
-  S.space = want;
-  setCurSpace(want);
-
-  S.profiles = S.allProfiles.filter(function(p){ return p.space_id === want; })
+  var profiles = allProfiles.filter(function(p){ return p.space_id === want; })
                              .sort(function(x,y){ return x.id - y.id; });
-  S.profile  = S.profiles.filter(function(p){ return p.owner_id === uid; })[0] || null;
-  if (!S.profile) return false;
-  S.others  = S.profiles.filter(function(p){ return p.owner_id !== uid; });
-  S.partner = S.others[0] || null;
+  var profile  = profiles.filter(function(p){ return p.owner_id === who; })[0] || null;
+  if (!profile) {
+    commitNoSpace(allProfiles, myProfiles);
+    return false;
+  }
 
   var rs = await Promise.all([
     cloud.database.from('records').select('*').order('record_date'),
@@ -706,14 +820,84 @@ async function loadAll(){
     cloud.database.from('rewards').select('*').order('id'),
     cloud.database.from('messages').select('*').order('id')
   ]);
-  var sp = S.space;
+  if (!loadIsLive(ep, token, who)) return null;   /* 旧会话/旧空间：整段丢弃，不碰 S */
+
+  var sp = want;
   function inSpace(i){ return (unwrap(rs[i]) || []).filter(function(r){ return r.space_id === sp; }); }
-  S.allRecords = unwrap(rs[0]) || [];
-  S.records  = inSpace(0);
-  S.todos    = inSpace(1);
-  S.tags     = inSpace(2);
-  S.rewards  = inSpace(3);
-  S.messages = inSpace(4);
+  var others = profiles.filter(function(p){ return p.owner_id !== who; });
+  /* —— 同一有效代数内一次性提交，避免半截状态 —— */
+  S.allProfiles = allProfiles;
+  S.myProfiles  = myProfiles;
+  S.space       = want;
+  setCurSpace(want);
+  S.profiles    = profiles;
+  S.profile     = profile;
+  S.others      = others;
+  S.partner     = others[0] || null;
+  S.allRecords  = unwrap(rs[0]) || [];
+  S.records     = inSpace(0);
+  S.todos       = inSpace(1);
+  S.tags        = inSpace(2);
+  S.rewards     = inSpace(3);
+  S.messages    = inSpace(4);
+  return true;
+}
+
+/* 「还没有空间」时的统一清空（cloud/local 共用）：只保留成员行本身，
+   其余用户态一律置空，避免把上一个空间的记录留在页面上。 */
+function commitNoSpace(allProfiles, myProfiles){
+  S.allProfiles = allProfiles || [];
+  S.myProfiles  = myProfiles || [];
+  S.profile = null;
+  S.profiles = [];
+  S.others = [];
+  S.partner = null;
+  S.space = '';
+  S.records = []; S.allRecords = []; S.todos = []; S.tags = []; S.rewards = []; S.messages = [];
+}
+
+/* local 模式：仅 profiles（已授权 SELECT）与 records（已授权 SELECT）；
+   小目标 / 标签 / 奖励 / 留言未接入本地后端，置空并显式提示（不伪造数据）。
+   返回值约定同 loadAll：true / false / null（null=结果作废，整段丢弃）。 */
+async function loadAllLocal(){
+  var ep = guard.current(), token = ++loadSeq, who = uid;
+  var pr = await LB.listProfiles();
+  if (!loadIsLive(ep, token, who)) return null;   /* 登出/换身份后迟到的 profiles：丢弃 */
+
+  var allProfiles = pr || [];
+  var myProfiles  = allProfiles.filter(function(p){ return p.owner_id === who; });
+  if (!myProfiles.length) {
+    commitNoSpace(allProfiles, []);
+    return false;
+  }
+
+  var ids  = myProfiles.map(function(p){ return p.space_id; });
+  var want = curSpaceStore();
+  if (ids.indexOf(want) < 0) want = ids[0];
+  var profiles = allProfiles.filter(function(p){ return p.space_id === want; })
+                             .sort(function(x,y){ return (x.id||0) - (y.id||0); });
+  var profile  = profiles.filter(function(p){ return p.owner_id === who; })[0] || null;
+  if (!profile) {
+    commitNoSpace(allProfiles, myProfiles);
+    return false;
+  }
+
+  var recs = await LB.listRecords();   /* RLS 只返回本人可见行 */
+  if (!loadIsLive(ep, token, who)) return null;   /* 登出/换身份后迟到的 records：丢弃 */
+
+  var others = profiles.filter(function(p){ return p.owner_id !== who; });
+  /* —— 同一有效代数内一次性提交 —— */
+  S.allProfiles = allProfiles;
+  S.myProfiles  = myProfiles;
+  S.space       = want;
+  setCurSpace(want);
+  S.profiles    = profiles;
+  S.profile     = profile;
+  S.others      = others;
+  S.partner     = others[0] || null;
+  S.allRecords  = recs || [];
+  S.records     = (recs || []).filter(function(r){ return r.space_id === want; });
+  S.todos = []; S.tags = []; S.rewards = []; S.messages = [];
   return true;
 }
 
@@ -1289,6 +1473,8 @@ function badges(list, days){
 
 /* ---------- 交互动作 ---------- */
 async function toggleTodo(id){
+  /* 小目标未接入本地后端：勾选/取消勾选都写不进任何地方，不伪装成功 */
+  if (localUnsupported('小目标')) return;
   var today = recOn(uid, todayStr());
   var done = today && today.todo_done ? today.todo_done.slice() : [];
   var i = done.indexOf(id);
@@ -1316,59 +1502,133 @@ async function saveRecord(){
   var w = Number(S.draft.weight);
   if (!w || w < 20 || w > 400) { toast('请填一个合理的体重'); return; }
   var btn = $('btn-save-rec'); btn.disabled = true; btn.textContent = '保存中…';
+
+  /* 这次保存属于哪一段会话：之后每个 await 回来都要重新确认。
+     注意能力边界——守卫只能阻止「旧响应写回页面」，撤不回已经发出去的请求。 */
+  var ep = guard.current(), who = uid;
+  function stillMine(){ return guard.isCurrent(ep) && who === uid; }
+
+  /* 落库目标在按下保存的瞬间定下来，不再依赖途中可能被清掉的 S */
+  var prof = S.profile || {};
+  var spaceId = prof.space_id;
+  var nick = prof.nickname;
+
+  /* M2：写入、镜像、刷新是三件独立的事，结果分别记账 */
+  var primary = null, writeErr = null, mirror = null, refresh = 'ok';
+
   try {
-    var today = recOn(uid, todayStr());
+    var today = recOn(who, todayStr());
     var payload = {
       weight: w, tags: S.draft.tags || [], todo_done: S.draft.todoDone || [],
       mood: S.draft.mood || null, note: S.draft.note || null
     };
     if (today) {
-      unwrap(await cloud.database.from('records').update(payload).eq('id', today.id).select());
+      if (BACKEND === 'local') {
+        var lup = await LB.updateRecord(today.id, payload);
+        /* meta.updated=0（含 204 零行）是「明确没改到行」，绝不当作成功，也不是「未知」 */
+        primary = lup.applied ? PactFitBE.WRITE_OUTCOME.CONFIRMED : PactFitBE.WRITE_OUTCOME.NOT_APPLIED;
+      } else {
+        unwrap(await cloud.database.from('records').update(payload).eq('id', today.id).select());
+        primary = PactFitBE.WRITE_OUTCOME.CONFIRMED;
+      }
     } else {
-      payload.owner_name = S.profile.nickname;
-      payload.space_id = S.profile.space_id;
+      payload.owner_name = nick;
+      payload.space_id = spaceId;
       payload.record_date = todayStr();
-      unwrap(await cloud.database.from('records').insert(payload).select());
+      if (BACKEND === 'local') {
+        /* 本地：records 已授权 INSERT；owner_id 由适配层按当前 sub 注入 */
+        await LB.insertRecord(payload);
+      } else {
+        unwrap(await cloud.database.from('records').insert(payload).select());
+      }
+      primary = PactFitBE.WRITE_OUTCOME.CONFIRMED;
     }
-    await mirrorToday(w);
-    S.draft = { weight:null, tags:[], todoDone:[], mood:null, note:'' };
-    await loadAll();
-    await autoCheckRewards();
-    toast('已保存，他能看到了');
-    switchTab('home');
-  } catch(e){
-    toast('保存失败：'+(e && e.message || '请重试'));
-    btn.disabled = false; btn.textContent = '保存';
+  } catch(e) {
+    /* 服务端明确拒绝 / 网络中断拿不到答复 —— 两种都不是「保存失败」能概括的 */
+    primary = PactFitBE.classifyWriteError(e);
+    writeErr = e;
   }
+
+  if (primary === PactFitBE.WRITE_OUTCOME.CONFIRMED && stillMine()) {
+    mirror = await mirrorToday(w);           /* 逐项结果，部分成功不再被吞掉 */
+    if (stillMine()) S.draft = { weight:null, tags:[], todoDone:[], mood:null, note:'' };
+    try {
+      await loadAll();                       /* 刷新失败 ≠ 写入失败 */
+      if (BACKEND !== 'local') await autoCheckRewards();
+    } catch(e2) {
+      refresh = 'failed';
+    }
+  } else if (primary === PactFitBE.WRITE_OUTCOME.NOT_APPLIED && stillMine()) {
+    try { await loadAll(); } catch(e2) { refresh = 'failed'; }
+  }
+
+  var stale = !stillMine();
+  var out = PactFitBE.describeSaveOutcome({
+    primary: primary, error: writeErr, refresh: refresh, mirror: mirror, stale: stale,
+    successText: (BACKEND === 'local' ? '已保存' : '已保存，他能看到了')
+  });
+
+  btn.disabled = false; btn.textContent = '保存';
+  if (out.kind !== 'silent') toast(out.message);   /* 已登出：静默，不弹旧会话的提示 */
+  if (stale) return;
+  if (primary === PactFitBE.WRITE_OUTCOME.CONFIRMED) switchTab('home');
+  else renderAll();
 }
 
 /* 我在别的空间里也该显示今天的体重：记一次，其他组跟着同步。
-   那边没有今天的记录就新建；已经有就只改体重/标签/心情，不动它自己的小目标勾选。 */
+   那边没有今天的记录就新建；已经有就只改体重/标签/心情，不动它自己的小目标勾选。
+   返回逐项汇总（confirmed / notApplied / rejected / unknown），调用方据此如实提示，
+   绝不把「部分成功」说成全部成功或全部失败。 */
 async function mirrorToday(w){
-  var tags = (S.draft.tags || []).slice();
-  var mood = S.draft.mood || null;
-  var others = S.myProfiles.filter(function(p){ return p.space_id !== S.space; });
+  var ep = guard.current(), who = uid;
+  var draft = S.draft || {};
+  var tags = (draft.tags || []).slice();
+  var mood = draft.mood || null;
+  var cur  = S.space;
+  var nick = (S.profile && S.profile.nickname) || '';
+  var others = S.myProfiles.slice().filter(function(p){ return p.space_id !== cur; });
+  var allRecords = S.allRecords.slice();
+  var items = [];
+
   for (var i=0;i<others.length;i++){
     var sp = others[i].space_id;
-    var ex = S.allRecords.filter(function(x){
-      return x.space_id === sp && x.owner_id === uid && String(x.record_date).slice(0,10) === todayStr();
+    if (!guard.isCurrent(ep) || who !== uid) {
+      /* 中途登出/换身份：剩下的请求不再发出（服务端也就不会有这些写入），如实记为未写入 */
+      items.push({ space: sp, outcome: PactFitBE.WRITE_OUTCOME.NOT_APPLIED });
+      continue;
+    }
+    var ex = allRecords.filter(function(x){
+      return x.space_id === sp && x.owner_id === who && String(x.record_date).slice(0,10) === todayStr();
     })[0];
     try {
       if (ex) {
-        unwrap(await cloud.database.from('records').update({ weight:w, tags:tags, mood:mood }).eq('id', ex.id).select());
+        if (BACKEND === 'local') {
+          var r = await LB.updateRecord(ex.id, { weight:w, tags:tags, mood:mood });
+          items.push({ space: sp, outcome: r.applied ? PactFitBE.WRITE_OUTCOME.CONFIRMED : PactFitBE.WRITE_OUTCOME.NOT_APPLIED });
+        } else {
+          unwrap(await cloud.database.from('records').update({ weight:w, tags:tags, mood:mood }).eq('id', ex.id).select());
+          items.push({ space: sp, outcome: PactFitBE.WRITE_OUTCOME.CONFIRMED });
+        }
       } else {
-        unwrap(await cloud.database.from('records').insert({
-          owner_name: S.profile.nickname, space_id: sp, record_date: todayStr(),
+        var body = {
+          owner_name: nick, space_id: sp, record_date: todayStr(),
           weight: w, tags: tags, todo_done: [], mood: mood
-        }).select());
+        };
+        if (BACKEND === 'local') await LB.insertRecord(body);
+        else unwrap(await cloud.database.from('records').insert(body).select());
+        items.push({ space: sp, outcome: PactFitBE.WRITE_OUTCOME.CONFIRMED });
       }
-    } catch(e){ /* 单个空间失败不影响主流程 */ }
+    } catch(e) {
+      items.push({ space: sp, outcome: PactFitBE.classifyWriteError(e) });
+    }
   }
+  return PactFitBE.summarizeMirror(items);
 }
 
 async function sendMessage(){
   var el = $('msg-input'); var txt = (el.value||'').trim();
   if (!txt) return;
+  if (BACKEND === 'local') { toast('留言在本地模式暂不支持'); return; }
   try {
     unwrap(await cloud.database.from('messages').insert({
       owner_name: S.profile.nickname, space_id: S.profile.space_id, text: txt
@@ -1399,6 +1659,7 @@ async function rewardAction(id, act){
 
 /* 达标自动解锁：把已达成的 active 变成 pending */
 async function autoCheckRewards(){
+  if (BACKEND === 'local') return;   /* 奖励未接入本地后端：跳过，不伪造状态 */
   var changed = false;
   for (var i=0;i<S.rewards.length;i++){
     var r = S.rewards[i];
@@ -1509,6 +1770,7 @@ function openSettings(){
 }
 
 async function saveProfile(){
+  if (BACKEND === 'local') { toast('资料修改在本地模式暂不支持（本轮未接入）'); return; }
   var nick = ($('set-nick').value||'').trim();
   var start = Number($('set-start').value), target = Number($('set-target').value);
   if (!nick) { toast('昵称不能空'); return; }
@@ -1529,6 +1791,7 @@ function saveNicknameToRecords(nick){
 }
 
 async function addTodo(){
+  if (localUnsupported('小目标')) return;   /* 必须在 prompt / 写入之前判定 */
   var txt = prompt('新的小目标：');
   if (!txt || !txt.trim()) return;
   try {
@@ -1537,13 +1800,15 @@ async function addTodo(){
       text: txt.trim().slice(0,40), sort: (S.todos.length+1)*10
     }).select());
     await loadAll(); openSettings();
-  } catch(e){ toast('添加失败'); }
+  } catch(e){ toast(actionErrText(e, '添加失败')); }
 }
 async function delTodo(id){
+  if (localUnsupported('小目标')) return;
   try { unwrap(await cloud.database.from('todos').delete().eq('id', id).select());
-    await loadAll(); openSettings(); } catch(e){ toast('删除失败'); }
+    await loadAll(); openSettings(); } catch(e){ toast(actionErrText(e, '删除失败')); }
 }
 async function addTag(){
+  if (localUnsupported('标签')) return;
   var txt = prompt('新的标签：');
   if (!txt || !txt.trim()) return;
   try {
@@ -1552,21 +1817,29 @@ async function addTag(){
       text: txt.trim().slice(0,20), sort: (S.tags.length+1)*10
     }).select());
     await loadAll(); openSettings();
-  } catch(e){ toast('添加失败'); }
+  } catch(e){ toast(actionErrText(e, '添加失败')); }
 }
 async function delTag(id){
+  if (localUnsupported('标签')) return;
   try { unwrap(await cloud.database.from('tags').delete().eq('id', id).select());
-    await loadAll(); openSettings(); } catch(e){ toast('删除失败'); }
+    await loadAll(); openSettings(); } catch(e){ toast(actionErrText(e, '删除失败')); }
 }
+/* 记录页「+ 自定义」：既要把标签加到今天这条记录，又要存进「常用标签」。
+   常用标签未接入本地后端，所以本地模式整条拒绝——只加半边会让用户以为已经存下来了。 */
 function addCustomTag(){
+  if (localUnsupported('标签')) return;
   var txt = prompt('自定义标签：');
   if (!txt || !txt.trim()) return;
   var t = txt.trim().slice(0,20);
   if (S.draft.tags.indexOf(t) < 0) S.draft.tags.push(t);
   // 顺手存进常用标签
-  cloud.database.from('tags').insert({
-    owner_name: S.profile.nickname, space_id: S.profile.space_id, text: t, sort: (S.tags.length+1)*10
-  }).then(function(){ return loadAll().then(renderRecord); }, function(){ renderRecord(); });
+  try {
+    var p = cloud.database.from('tags').insert({
+      owner_name: S.profile.nickname, space_id: S.profile.space_id, text: t, sort: (S.tags.length+1)*10
+    });
+    Promise.resolve(p).then(function(){ return loadAll().then(renderRecord); },
+                            function(){ renderRecord(); });
+  } catch(e) { /* 常用标签写不进去不影响本次记录；不弹「保存失败」误导用户 */ }
 }
 
 /* ---------- 立约定 ---------- */
@@ -1627,6 +1900,11 @@ function countdown(btn, sec){
 async function sendCode(){
   $('login-err').textContent = '';
   if (loginMode === 'phone') {
+    if (BACKEND === 'local') {
+      /* GoTrue 本地无 SMS provider：明确告知，不伪装成功 */
+      $('login-err').textContent = '本地开发模式暂不支持手机号登录，请切换到邮箱登录';
+      return;
+    }
     var phone = ($('phone').value||'').trim();
     if (!/^1\d{10}$/.test(phone)) {
       $('phone-err').classList.remove('hidden');
@@ -1646,6 +1924,19 @@ async function sendCode(){
     }
     $('email-err').classList.add('hidden');
     var b2 = $('btn-send-email'); b2.disabled = true; b2.textContent = '发送中…';
+    if (BACKEND === 'local') {
+      /* 本地 GoTrue 发的是链接邮件：首次注册为 signup 确认，已有用户为 magiclink 登录 */
+      try {
+        await LB.requestEmailOtp(email);
+        pendingOtp = { kind:'email', value:email, localLink:true };
+        $('login-err').textContent = '登录链接已发送（本地环境在 Mailpit :8025 查看），请把邮件里的整条链接粘贴到下方输入框';
+        countdown(b2, 60);
+      } catch(e) {
+        b2.disabled = false; b2.textContent = '获取验证码';
+        $('login-err').textContent = (e && e.message) || '发送失败';
+      }
+      return;
+    }
     var res2 = await cloud.auth.sendOtp({ email: email });
     if (res2.error) { b2.disabled = false; b2.textContent = '获取验证码'; $('login-err').textContent = res2.error.message || '发送失败'; return; }
     pendingOtp = { kind:'email', value:email, verificationId:res2.data.verificationId, isExistingUser:res2.data.isExistingUser };
@@ -1655,6 +1946,23 @@ async function sendCode(){
 async function doLogin(){
   $('login-err').textContent = '';
   var token = ($('token').value||'').trim();
+  if (BACKEND === 'local') {
+    /* 链接验证：只接受邮件里的完整链接（type 由链接决定 signup / magiclink）；
+       本地模式不是六位验证码；token 不进日志、不进错误消息 */
+    if (!token) { $('login-err').textContent = '请粘贴邮件里的完整登录链接'; return; }
+    var btnL = $('btn-login'); btnL.disabled = true; btnL.textContent = '登录中…';
+    try {
+      await LB.verifyEmailLink(token);
+      $('token').value = '';
+      pendingOtp = null;
+      guard.bump();   /* 新的会话边界：上一段会话遗留的在途请求一律作废 */
+      await afterLogin();
+    } catch(e) {
+      $('login-err').textContent = (e && e.message) || '登录失败，链接可能已失效';
+    }
+    btnL.disabled = false; btnL.textContent = '登录 / 注册';
+    return;
+  }
   if (!pendingOtp) { $('login-err').textContent = '请先获取验证码'; return; }
   if (!token) { $('login-err').textContent = '请输入验证码'; return; }
   var btn = $('btn-login'); btn.disabled = true; btn.textContent = '登录中…';
@@ -1665,26 +1973,71 @@ async function doLogin(){
   btn.disabled = false; btn.textContent = '登录 / 注册';
   if (res.error) { $('login-err').textContent = res.error.message || '验证码不对，或者已过期'; return; }
   pendingOtp = null;
+  guard.bump();   /* 新的会话边界（与 local 分支同一条规则） */
   await afterLogin(res.data);
 }
+/* H-3-PAIR-RACE：防重入。同一会话代数内的连续点击只发一次登出请求、只弹一次提示；
+   期间若发生了新的登录（guard.current() 已被 doLogin 的 bump 改变），允许新的登出。
+   锁的所有权归「最新一次实际开始的登出」：旧流程的 finally 只在自己仍是
+   doLogoutEpoch 的持有者时才解锁，否则由最新流程的 finally 释放（防跨会话清锁）。 */
+var doLogoutBusy = false, doLogoutEpoch = null;
 async function doLogout(){
-  try { await cloud.auth.signOut(); } catch(e){}
-  S.profile = null; S.partner = null; S.others = []; S.profiles = []; S.myProfiles = []; S.allProfiles = [];
-  S.space = ''; setCurSpace('');
-  S.records=[]; S.allRecords=[]; S.todos=[]; S.tags=[]; S.rewards=[]; S.messages=[];
+  if (doLogoutBusy && guard.current() === doLogoutEpoch) return;
+  doLogoutBusy = true;
+  var ep;   /* 先声明后赋值：保证任何有效路径进入 finally 时 ep 均有确定值 */
+  try {
+  /* 顺序很重要：先作废代数，再清状态，最后才去等 HTTP。
+     已登出后在途的 saveRecord / loadAll 因此既不能写回 S，也不会弹提示。 */
+  ep = guard.bump();
+  doLogoutEpoch = ep;
+  uid = '';
+  PactFitBE.clearUserState(S);
+  setCurSpace('');
+  /* 同步就退回登录页：状态已清空，不能让 app 视图再露着（否则清空到 show 之间
+     的点击会拿空 S 去渲染）；这里也不会误清新登录用户——此时还没有任何 await。 */
   closeSheet(); show('view-login');
+  var note = '';
+  if (BACKEND === 'local') {
+    try {
+      var r = await LB.signOut();
+      note = r.serverRevoked ? '已退出（服务端会话已撤销）'
+           : (r.localCleared ? '已退出（本地已清理，服务端撤销未确认）' : '已退出');
+    } catch(e) {
+      note = '已退出（清理出错：' + ((e && e.message) || '未知') + '）';
+    }
+  } else {
+    try { await cloud.auth.signOut(); } catch(e){}
+  }
+  if (!guard.isCurrent(ep)) return;   /* 期间又发生了新的登录：交给后者处理，不弹旧提示 */
+  if (note) toast(note);
+  } finally {
+    /* H-3-PAIR-RACE：仅当自己仍是最新登出代数的持有者时才解锁；
+       若锁已被更新会话的登出接管（doLogoutEpoch 被改写），绝不代替其解锁。
+       ep 未及赋值的极端异常路径直接解锁，防锁永久卡死。 */
+    if (ep === undefined || doLogoutEpoch === ep) doLogoutBusy = false;
+  }
 }
 
 /* ---------- 启动流程 ---------- */
 async function afterLogin(){
-  var sess = await cloud.auth.getSession();
-  var s = sess && sess.data;
-  uid = (s && s.user && (s.user.id || s.user.uid)) || '';
+  var ep = guard.current();   /* 本次登录流程的会话代数 */
+  if (BACKEND === 'local') {
+    var ls = await LB.getSession();
+    if (!guard.isCurrent(ep)) return;   /* 期间已登出/重新登录：丢弃 */
+    uid = ls.userId || '';
+  } else {
+    var sess = await cloud.auth.getSession();
+    if (!guard.isCurrent(ep)) return;
+    var s = sess && sess.data;
+    uid = (s && s.user && (s.user.id || s.user.uid)) || '';
+  }
   if (!uid) { show('view-login'); return; }
   S.loggedIn = true;
   show('view-boot');
   try {
     var ok = await loadAll();
+    if (!guard.isCurrent(ep)) return;
+    if (ok === null) return;                      /* 加载结果作废：不做任何界面判断 */
     // 邀请链接：?space=CODE
     var inv = null;
     try {
@@ -1697,11 +2050,19 @@ async function afterLogin(){
       initPairForm(ok ? true : false, inv);
       return;
     }
-    if (inv) { setCurSpace(inv); ok = await loadAll(); }
+    if (inv) {
+      if (!guard.isCurrent(ep)) return;
+      setCurSpace(inv);
+      ok = await loadAll();
+      if (!guard.isCurrent(ep)) return;           /* 旧 setCurSpace 造成的过期结果不再用 */
+      if (ok === null) return;
+    }
     if (!ok) { show('view-pair'); initPairForm(false); return; }
     await autoCheckRewards();
+    if (!guard.isCurrent(ep)) return;
     show('app'); renderAll();
   } catch(e){
+    if (!guard.isCurrent(ep)) return;
     show('view-login');
     $('login-err').textContent = '读取数据失败：' + (e && e.message || '请重试');
   }
@@ -1709,13 +2070,17 @@ async function afterLogin(){
 
 function switchSpace(id){
   if (!id || id === S.space) return;
+  var ep = guard.current(), who = uid;
   setCurSpace(id);
   S.draft = { weight:null, tags:[], todoDone:[], mood:null, note:'' };
-  loadAll().then(function(){
+  loadAll().then(function(ok){
+    if (!guard.isCurrent(ep) || who !== uid) return;   /* 旧会话：不切视图、不弹提示 */
+    if (ok === null) return;                           /* 被更晚的一次加载顶掉：让那次说了算 */
     closeSheet();
     renderAll();
     toast('已切到「' + spaceLabel(S.space, S.profiles) + '」');
   }, function(e){
+    if (!guard.isCurrent(ep) || who !== uid) return;
     toast('切换失败：' + (e && e.message || '请重试'));
   });
 }
@@ -1785,6 +2150,16 @@ function onSpaceInput(){
   peekTimer = setTimeout(function(){ peekSpace(code); }, 420);
 }
 async function peekSpace(code){
+  if (BACKEND === 'local') {
+    /* 本地模式不做口令探测（rpc_space_peek 未接入本轮最小范围），明确告知而非静默 */
+    var lp = $('pair-peek');
+    if (lp) {
+      lp.className = 'peek new';
+      lp.textContent = '本地开发模式不做口令探测，直接填下面信息继续即可';
+      lp.classList.remove('hidden');
+    }
+    return;
+  }
   try {
     var res = await cloud.database.rpc('space_peek', { code: code });
     var d = res && res.data;
@@ -1800,6 +2175,21 @@ async function peekSpace(code){
     el.classList.remove('hidden');
   } catch(e){ /* 探测失败不影响创建 */ }
 }
+/* 本地模式业务码 → 用户可读文案（服务端信封 code 原样透传，不做二次包装） */
+function localPairErrText(code){
+  var map = {
+    unauthenticated: '登录状态已失效，请重新登录',
+    rate_limited: '操作太频繁了，稍等一会再试',
+    invalid_nickname: '昵称不合规，换一个试试',
+    invalid_weight: '体重数值不合规，检查一下',
+    invalid_role: '角色参数不合规',
+    invalid_code: '这个口令不存在，检查一下',
+    code_collision: '口令刚好被占用了，请重新创建',
+    join_failed: '加入失败，请稍后重试'
+  };
+  return map[code] || ('没成功：' + (code || '未知错误'));
+}
+
 async function doPair(){
   var nick = ($('pair-nick').value||'').trim();
   var start = Number($('pair-start').value);
@@ -1818,11 +2208,46 @@ async function doPair(){
     return;
   }
   var btn = $('btn-pair'); btn.disabled = true; btn.textContent = '处理中…';
+  var ep = guard.current(), who = uid;
+  function stillMine(){ return guard.isCurrent(ep) && who === uid; }
   try {
+    if (BACKEND === 'local') {
+      /* 本地：创建/加入固定走 rpc_create_space / rpc_join_space
+         （profiles 无 INSERT 授权，适配层会拒绝直插）。 */
+      var lres = isJoin
+        ? await LB.joinSpace({ code: space, nickname: nick, startWeight: start, targetWeight: target })
+        : await LB.createSpace({ nickname: nick, startWeight: start, targetWeight: target });
+      if (!stillMine()) { btn.disabled = false; btn.textContent = pairBtnLabel(); return; }
+      if (!lres.ok) {   /* HTTP 200 + {ok:false} 一律按失败处理 */
+        btn.disabled = false; btn.textContent = pairBtnLabel();
+        err.textContent = localPairErrText(lres.code);
+        return;
+      }
+      var realCode = isJoin ? space : ((lres.raw && lres.raw.code) || space);
+      setCurSpace(realCode);
+      var okLocal = await loadAll();
+      if (!stillMine()) { btn.disabled = false; btn.textContent = pairBtnLabel(); return; }
+      if (okLocal === null) {           /* 被更晚的加载顶掉：交给那次处理，这里不抢视图 */
+        btn.disabled = false; btn.textContent = pairBtnLabel();
+        return;
+      }
+      if (!okLocal) {
+        btn.disabled = false; btn.textContent = pairBtnLabel();
+        err.textContent = '空间已' + (isJoin ? '加入' : '创建') + '，但资料读取失败，请稍后重试';
+        return;
+      }
+      btn.disabled = false; btn.textContent = pairBtnLabel();
+      try { if (location.search) history.replaceState(null, '', location.pathname); } catch(e){}
+      show('app'); renderAll(); switchTab('home');
+      if (pairAdd) toast('已加入「' + spaceLabel(S.space, S.profiles) + '」');
+      else toast('空间建好了，把口令「' + S.space + '」发给对方吧');
+      return;
+    }
     unwrap(await cloud.database.from('profiles').insert({
       owner_name: nick, space_id: space, nickname: nick, role: 'her',
       start_weight: start, target_weight: target
     }).select());
+    if (!stillMine()) { btn.disabled = false; btn.textContent = pairBtnLabel(); return; }
     // 先把当前空间切到新的这个，后面 loadAll 才会取到它
     setCurSpace(space);
     // 小目标和标签是整个空间共用的，只在空间里还没有的时候铺一遍默认值，
@@ -1852,6 +2277,10 @@ async function doPair(){
         await loadAll();
       } catch(e){}
     }
+    if (!stillMine()) {   /* 期间已登出/换身份：不抢视图、不弹旧提示 */
+      btn.disabled = false; btn.textContent = pairBtnLabel();
+      return;
+    }
     btn.disabled = false; btn.textContent = pairBtnLabel();
     try { if (location.search) history.replaceState(null, '', location.pathname); } catch(e){}
     show('app'); renderAll(); switchTab('home');
@@ -1860,6 +2289,7 @@ async function doPair(){
     else toast('空间建好了，把口令发给对方吧');
   } catch(e){
     btn.disabled = false; btn.textContent = pairBtnLabel();
+    if (!stillMine()) return;   /* 已登出/换身份：错误提示也不该落到新会话上 */
     err.textContent = '没成功：' + (e && e.message || '请重试');
   }
 }
@@ -1932,18 +2362,27 @@ $('btn-pair-back').onclick = function(){
   if (S.profile) { show('app'); renderAll(); } else { show('view-login'); }
 };
 $('btn-settings').onclick = openSettings;
+$('btn-pair-logout').onclick = doLogout;   /* H-3-PAIR：view-pair 的退出登录入口，复用既有 doLogout */
 
 (async function boot(){
   tickClock();
   setLoginMode('email');
+  if (BACKEND === 'local') applyLocalModeUi();
   try {
     initCloud();
-    var sess = await cloud.auth.getSession();
-    if (sess && sess.data && sess.data.user) { await afterLogin(); }
-    else { show('view-login'); }
+    if (BACKEND === 'local') {
+      var ls = await LB.getSession();
+      if (ls && ls.userId) { await afterLogin(); }
+      else { show('view-login'); }
+    } else {
+      var sess = await cloud.auth.getSession();
+      if (sess && sess.data && sess.data.user) { await afterLogin(); }
+      else { show('view-login'); }
+    }
   } catch(e){
     show('view-login');
-    $('login-err').textContent = '连接失败：' + (e && e.message || '请检查网络后重试');
+    $('login-err').textContent = (BACKEND === 'local' ? '本地后端连接失败：' : '连接失败：')
+      + (e && e.message || '请检查本地服务是否已启动（GoTrue :9999 / PostgREST :3000）');
   }
 })();
 
@@ -2046,9 +2485,19 @@ refreshInstallTip();
 
 /* ---------- service worker ---------- */
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', function(){
-    navigator.serviceWorker.register('sw.js').catch(function(){});
-  });
+  if (BACKEND === 'local') {
+    /* 本地开发模式：不注册 SW，并清掉同源旧注册——避免旧缓存外壳干扰接线验证
+       （仅在回环来源生效，且只影响 localhost/127.0.0.1 这个源）。 */
+    try {
+      navigator.serviceWorker.getRegistrations().then(function(rs){
+        rs.forEach(function(r){ try { r.unregister(); } catch(e){} });
+      }).catch(function(){});
+    } catch(e){}
+  } else {
+    window.addEventListener('load', function(){
+      navigator.serviceWorker.register('sw.js').catch(function(){});
+    });
+  }
 }
 </script>
 </body>

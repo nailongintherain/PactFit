@@ -1,0 +1,6 @@
+- generic [active] [ref=e1]:
+  - heading "PactFit Local Backend Browser Smoke Test" [level=1] [ref=e2]
+  - paragraph [ref=e3]: 独立开发联调页：仅加载 pactfit-local-api.js（local 模式，回环地址）。不含 WorkBuddy Cloud SDK，不注册 Service Worker，不持久化任何 token，页面只显示脱敏状态。
+  - generic [ref=e4]:
+    - generic [ref=e5]: 等待测试驱动…（window.__smoke）
+    - generic [ref=e6]: "selfCheck :: {\"ok\":true,\"hasCloudSdk\":false,\"serviceWorker\":\"none\",\"mode\":\"local\",\"authUrl\":\"http://127.0.0.1:9999\",\"restUrl\":\"http://127.0.0.1:3000\"}"
