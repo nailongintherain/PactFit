@@ -1,0 +1,2159 @@
+--
+-- PostgreSQL database dump
+--
+
+\restrict cwmcfV7IiFwzfvO5FmJaUBmVzKAgp38ln3VeiYZM6Vt6TyvFMHaLucWi88iPSFy
+
+-- Dumped from database version 17.11
+-- Dumped by pg_dump version 17.11
+
+SET statement_timeout = 0;
+SET lock_timeout = 0;
+SET idle_in_transaction_session_timeout = 0;
+SET transaction_timeout = 0;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SELECT pg_catalog.set_config('search_path', '', false);
+SET check_function_bodies = false;
+SET xmloption = content;
+SET client_min_messages = warning;
+SET row_security = off;
+
+--
+-- Name: migration; Type: SCHEMA; Schema: -; Owner: postgres
+--
+
+CREATE SCHEMA migration;
+
+
+ALTER SCHEMA migration OWNER TO postgres;
+
+--
+-- Name: private; Type: SCHEMA; Schema: -; Owner: postgres
+--
+
+CREATE SCHEMA private;
+
+
+ALTER SCHEMA private OWNER TO postgres;
+
+--
+--
+
+
+
+ALTER SCHEMA public OWNER TO pg_database_owner;
+
+--
+-- Name: SCHEMA public; Type: COMMENT; Schema: -; Owner: pg_database_owner
+--
+
+COMMENT ON SCHEMA public IS 'standard public schema';
+
+
+--
+-- Name: assert_member_owner_guard(); Type: FUNCTION; Schema: private; Owner: postgres
+--
+
+CREATE FUNCTION private.assert_member_owner_guard() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO ''
+    AS $$
+declare
+  v_codes text[];
+  v_bad   text;
+begin
+  -- ============================================================================
+  -- REV3-FIX（P0-3）：重写为"提交时不变量断言"。
+  --
+  -- 【v1/v2/REV3 的缺口（独立复审确认）】
+  --   旧实现按事件时刻的 OLD/NEW 行身份过滤（"只盯 owner 自己的行"）：
+  --     · UPDATE 分支只读 NEW.space_id / NEW.user_id ——
+  --       `UPDATE space_members SET user_id = 'x' WHERE ...`（owner 行）会因
+  --       NEW.user_id <> owner 直接 return null 放行；
+  --       `UPDATE space_members SET space_id = 'Y' WHERE ...`（owner 行搬走）
+  --       同样放行 —— 两种改写都让未归档空间在提交时失去有效 owner，
+  --       且提交时不再有任何触发器拦得住（spaces 侧触发器只监听 spaces 列）。
+  --     · 不变量的正确性不得依赖"普通客户端没有 space_members UPDATE 授权"
+  --       （DEFINER 函数、未来授权变更、直接 SQL 运维都可能绕过）。
+  --
+  -- 【新语义：不变量即断言，与 C4 审计完全同构】
+  --   对**本次事件涉及的空间集合**（DELETE→OLD.space_id；INSERT→NEW.space_id；
+  --   UPDATE→OLD 与 NEW 的 space_id 并集 —— 跨空间改写会涉及两个空间）：
+  --     提交时，凡未归档且 owner_user_id 非空的空间 s，
+  --     必须存在 (space_id=s.code, user_id=s.owner_user_id, left_at is null) 的成员行。
+  --
+  -- 【OLD/NEW 快照 vs 提交时实际状态（DEFERRABLE INITIALLY DEFERRED）】
+  --   延迟行级触发器在**提交时**逐事件触发，每个事件携带的是**事件时刻**的
+  --   OLD/NEW 快照；但触发器执行时全部数据修改已完成，表内即**最终状态**。
+  --   因此本函数：只用 OLD/NEW 识别"涉及哪些空间"（身份可能已被改写，
+  --   快照恰恰是发现改写的唯一线索），判定一律**重读提交时状态**。
+  --   这保证：
+  --     · 同一事务内"临时改坏 → 再改回来"的多条 UPDATE，各事件快照虽有
+  --       违规瞬间，但提交时不变量成立 → 全部放行（不误拒绝最终合法变更）；
+  --     · dissolve 同事务"先全员退出后归档"（或反序）：提交时 spaces 已归档
+  --       → 豁免，合法解散不受影响；
+  --     · 创建（先 spaces 后 members）与重加（复活 left_at=null）：提交时
+  --       不变量成立 → 放行。
+  -- ============================================================================
+  if tg_op = 'DELETE' then
+    v_codes := array[old.space_id];
+  elsif tg_op = 'INSERT' then
+    v_codes := array[new.space_id];
+  else                                        -- UPDATE：OLD 与 NEW 可能涉及不同空间
+    v_codes := array[old.space_id, new.space_id];
+  end if;
+
+  select s.code into v_bad
+    from public.spaces s
+   where s.code = any(v_codes)
+     and s.archived_at is null                 -- 提交时已归档：豁免（X1）
+     and s.owner_user_id is not null
+     and not exists (                          -- 提交时 owner 必须有有效成员行
+       select 1 from public.space_members m
+        where m.space_id = s.code
+          and m.user_id   = s.owner_user_id
+          and m.left_at is null
+     )
+   limit 1;
+
+  if v_bad is not null then
+    raise exception 'owner_not_active_member_at_commit: %', v_bad
+      using errcode = '23514',
+            hint = '未归档空间的 owner 在提交时必须存在有效成员行（user_id/space_id/left_at 不得被改写成破坏该不变量）';
+  end if;
+
+  return null;
+end;
+$$;
+
+
+ALTER FUNCTION private.assert_member_owner_guard() OWNER TO postgres;
+
+--
+-- Name: assert_space_owner_is_member(); Type: FUNCTION; Schema: private; Owner: postgres
+--
+
+CREATE FUNCTION private.assert_space_owner_is_member() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO ''
+    AS $$
+declare
+  v_owner    text;
+  v_archived timestamptz;
+begin
+  select s.owner_user_id, s.archived_at
+    into v_owner, v_archived
+    from public.spaces s
+   where s.code = new.code;
+
+  if v_archived is not null then return null; end if;   -- 已归档：成员必然全退出
+  if v_owner is null        then return null; end if;   -- unclaimed：无 owner 可断言
+
+  if not exists (
+    select 1 from public.space_members m
+     where m.space_id = new.code and m.user_id = v_owner and m.left_at is null
+  ) then
+    raise exception 'owner_not_active_member: %', new.code
+      using errcode = '23514', hint = 'owner_user_id 必须指向该空间的有效成员';
+  end if;
+
+  return null;
+end;
+$$;
+
+
+ALTER FUNCTION private.assert_space_owner_is_member() OWNER TO postgres;
+
+--
+-- Name: audit_event(text, text, text, text, jsonb); Type: FUNCTION; Schema: private; Owner: postgres
+--
+
+CREATE FUNCTION private.audit_event(p_action text, p_actor text, p_target text, p_result text, p_detail jsonb) RETURNS void
+    LANGUAGE sql SECURITY DEFINER
+    SET search_path TO ''
+    AS $$
+  insert into migration.action_log (action, actor, target, result, detail)
+  values (p_action, p_actor, left(btrim(coalesce(p_target, '')), 24), p_result, p_detail);
+$$;
+
+
+ALTER FUNCTION private.audit_event(p_action text, p_actor text, p_target text, p_result text, p_detail jsonb) OWNER TO postgres;
+
+--
+-- Name: bump_rate(text, text, integer, integer); Type: FUNCTION; Schema: private; Owner: postgres
+--
+
+CREATE FUNCTION private.bump_rate(p_scope text, p_subject text, p_limit integer, p_window_seconds integer) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO ''
+    AS $$
+declare
+  v_win timestamptz;
+  v_cnt integer;
+begin
+  v_win := to_timestamp(floor(extract(epoch from now()) / p_window_seconds) * p_window_seconds);
+
+  insert into private.rate_hits (scope, subject, window_start, cnt)
+  values (p_scope, p_subject, v_win, 1)
+  on conflict (scope, subject, window_start)
+  do update set cnt = private.rate_hits.cnt + 1
+  returning cnt into v_cnt;
+
+  return v_cnt;
+end;
+$$;
+
+
+ALTER FUNCTION private.bump_rate(p_scope text, p_subject text, p_limit integer, p_window_seconds integer) OWNER TO postgres;
+
+--
+-- Name: is_space_member(text); Type: FUNCTION; Schema: private; Owner: postgres
+--
+
+CREATE FUNCTION private.is_space_member(p_code text) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO ''
+    AS $$
+  select exists (
+    select 1 from public.space_members m
+     where m.space_id = p_code
+       and m.user_id  = (select auth.uid())::text
+       and m.left_at is null
+  );
+$$;
+
+
+ALTER FUNCTION private.is_space_member(p_code text) OWNER TO postgres;
+
+--
+-- Name: is_space_member_of(text, text); Type: FUNCTION; Schema: private; Owner: postgres
+--
+
+CREATE FUNCTION private.is_space_member_of(p_user text, p_code text) RETURNS boolean
+    LANGUAGE sql STABLE STRICT SECURITY DEFINER
+    SET search_path TO ''
+    AS $$
+  select exists (
+    select 1 from public.space_members m
+     where m.space_id = p_code and m.user_id = p_user and m.left_at is null
+  );
+$$;
+
+
+ALTER FUNCTION private.is_space_member_of(p_user text, p_code text) OWNER TO postgres;
+
+--
+-- Name: my_space_ids(); Type: FUNCTION; Schema: private; Owner: postgres
+--
+
+CREATE FUNCTION private.my_space_ids() RETURNS SETOF text
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO ''
+    AS $$
+  select m.space_id
+    from public.space_members m
+   where m.user_id = (select auth.uid())::text
+     and m.left_at is null;
+$$;
+
+
+ALTER FUNCTION private.my_space_ids() OWNER TO postgres;
+
+--
+-- Name: rate_limited(text, text, integer, integer, integer, integer); Type: FUNCTION; Schema: private; Owner: postgres
+--
+
+CREATE FUNCTION private.rate_limited(p_scope text, p_subject text, p_limit_a integer, p_window_a integer, p_limit_b integer, p_window_b integer) RETURNS boolean
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO ''
+    AS $$
+declare
+  v_a integer;
+  v_b integer;
+begin
+  -- 变量逐一赋值：保证两次 INSERT 都执行（P1-1）
+  v_a := private.bump_rate(p_scope || ':a', p_subject, p_limit_a, p_window_a);
+  v_b := private.bump_rate(p_scope || ':b', p_subject, p_limit_b, p_window_b);
+  return (v_a > p_limit_a) or (v_b > p_limit_b);
+end;
+$$;
+
+
+ALTER FUNCTION private.rate_limited(p_scope text, p_subject text, p_limit_a integer, p_window_a integer, p_limit_b integer, p_window_b integer) OWNER TO postgres;
+
+--
+-- Name: rpc_create_space(text, text, numeric, numeric); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.rpc_create_space(p_nickname text, p_role text DEFAULT 'her'::text, p_start_weight numeric DEFAULT NULL::numeric, p_target_weight numeric DEFAULT NULL::numeric) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO ''
+    AS $$
+declare
+  v_uid  text;
+  v_code text;
+  v_try  integer := 0;
+  v_i    integer;
+  v_role text;
+  v_chars constant text := 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+begin
+  v_uid := (select auth.uid())::text;
+  if v_uid is null then
+    return jsonb_build_object('ok', false, 'code', 'unauthenticated');
+  end if;
+
+  if private.bump_rate('space:create', v_uid, 5, 3600) > 5 then
+    perform private.audit_event('space.create', v_uid, null, 'rate_limited', null);
+    return jsonb_build_object('ok', false, 'code', 'rate_limited');
+  end if;
+
+  -- REV3（三.1）：非法 role 拒绝，不再静默映射 'her'。
+  -- 缺省参数（未传）仍为 'her'；显式传 null 或其他值 → invalid_role。
+  if p_role is null or p_role not in ('her','him') then
+    perform private.audit_event('space.create', v_uid, null, 'invalid_role', null);
+    return jsonb_build_object('ok', false, 'code', 'invalid_role');
+  end if;
+  v_role := p_role;
+
+  if p_nickname is null or length(btrim(p_nickname)) = 0 or length(p_nickname) > 24 then
+    perform private.audit_event('space.create', v_uid, null, 'invalid_nickname', null);
+    return jsonb_build_object('ok', false, 'code', 'invalid_nickname');
+  end if;
+  if p_start_weight is not null and (p_start_weight < 20 or p_start_weight > 400) then
+    perform private.audit_event('space.create', v_uid, null, 'invalid_weight', null);
+    return jsonb_build_object('ok', false, 'code', 'invalid_weight');
+  end if;
+  if p_target_weight is not null and (p_target_weight < 20 or p_target_weight > 400) then
+    perform private.audit_event('space.create', v_uid, null, 'invalid_weight', null);
+    return jsonb_build_object('ok', false, 'code', 'invalid_weight');
+  end if;
+
+  loop
+    v_try := v_try + 1;
+    v_code := 'FIT-';
+    for v_i in 1..6 loop
+      v_code := v_code || substr(v_chars, (get_byte(gen_random_bytes(1), 0) % 32) + 1, 1);
+    end loop;
+    begin
+      insert into public.spaces (code, owner_status, owner_user_id)
+      values (v_code, 'verified', v_uid);
+      exit;
+    exception when unique_violation then
+      if v_try >= 5 then
+        perform private.audit_event('space.create', v_uid, null, 'code_collision', null);
+        return jsonb_build_object('ok', false, 'code', 'code_collision');
+      end if;
+    end;
+  end loop;
+
+  insert into public.space_members (space_id, user_id, role) values (v_code, v_uid, 'member');
+
+  -- D1：档案由 RPC 创建（D1b 后客户端已无 profiles INSERT 权限）
+  insert into public.profiles (owner_id, owner_name, space_id, nickname, role, start_weight, target_weight)
+  values (v_uid, p_nickname, v_code, p_nickname, v_role, p_start_weight, p_target_weight)
+  on conflict (owner_id, space_id) do update
+     set nickname      = excluded.nickname,
+         role          = excluded.role,
+         start_weight  = coalesce(excluded.start_weight,  public.profiles.start_weight),
+         target_weight = coalesce(excluded.target_weight, public.profiles.target_weight);
+
+  perform private.audit_event('space.create', v_uid, v_code, 'ok', null);
+  return jsonb_build_object('ok', true, 'code', v_code);
+end;
+$$;
+
+
+ALTER FUNCTION public.rpc_create_space(p_nickname text, p_role text, p_start_weight numeric, p_target_weight numeric) OWNER TO postgres;
+
+--
+-- Name: rpc_dissolve_space(text); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.rpc_dissolve_space(p_code text) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO ''
+    AS $$
+declare
+  v_uid       text;
+  v_code      text;
+  v_arch      timestamptz;
+  v_owner     text;
+  v_owner_st  text;
+  v_exists    boolean;
+  v_arch_at   timestamptz;
+begin
+  v_uid := (select auth.uid())::text;
+  if v_uid is null then
+    return jsonb_build_object('ok', false, 'code', 'unauthenticated');
+  end if;
+
+  v_code := upper(btrim(coalesce(p_code, '')));
+
+  -- REV3（三.4）：真单桶 3/小时（v2 双桶放行次数同为 3，但双行冗余写入）
+  if private.bump_rate('space:dissolve', v_uid, 3, 3600) > 3 then
+    perform private.audit_event('space.dissolve', v_uid, v_code, 'rate_limited', null);
+    return jsonb_build_object('ok', false, 'code', 'rate_limited');
+  end if;
+
+  select true, s.archived_at, s.owner_user_id, s.owner_status
+    into v_exists, v_arch, v_owner, v_owner_st
+    from public.spaces s
+   where s.code = v_code
+     for update;                      -- 与 join/leave 同一把锁
+
+  if v_exists is null then
+    perform private.audit_event('space.dissolve', v_uid, v_code, 'invalid_code', null);
+    -- REV3（二.2）：外部与 not_owner 完全同构（存在性探测防线）
+    return jsonb_build_object('ok', false, 'code', 'not_owner');
+  end if;
+
+  -- REV2（P0-1）+ REV3（二.2）：owner 判定先于 already_archived；
+  -- 非 owner（无论空间是否归档）统一 not_owner，无任何附加字段。
+  if v_owner_st <> 'verified' or v_owner is distinct from v_uid then
+    perform private.audit_event('space.dissolve', v_uid, v_code, 'not_owner', null);
+    return jsonb_build_object('ok', false, 'code', 'not_owner');
+  end if;
+
+  -- 只有真正的 owner 才能走到这里：幂等解散语义得以保留
+  if v_arch is not null then
+    perform private.audit_event('space.dissolve', v_uid, v_code, 'already_archived', null);
+    return jsonb_build_object('ok', true, 'code', 'already_archived', 'archived_at', v_arch);
+  end if;
+
+  update public.spaces set archived_at = now() where code = v_code returning archived_at into v_arch_at;
+  update public.space_members set left_at = now()
+   where space_id = v_code and left_at is null;
+
+  perform private.audit_event('space.dissolve', v_uid, v_code, 'ok', null);
+  return jsonb_build_object('ok', true, 'code', 'archived', 'archived_at', v_arch_at);
+end;
+$$;
+
+
+ALTER FUNCTION public.rpc_dissolve_space(p_code text) OWNER TO postgres;
+
+--
+-- Name: rpc_join_space(text, text, text, numeric, numeric); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.rpc_join_space(p_code text, p_nickname text, p_role text DEFAULT 'her'::text, p_start_weight numeric DEFAULT NULL::numeric, p_target_weight numeric DEFAULT NULL::numeric) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO ''
+    AS $$
+declare
+  v_uid    text;
+  v_code   text;
+  v_arch   timestamptz;
+  v_exists boolean;
+  v_role   text;
+  v_active boolean;
+begin
+  v_uid := (select auth.uid())::text;
+  if v_uid is null then
+    return jsonb_build_object('ok', false, 'code', 'unauthenticated');
+  end if;
+
+  v_code := upper(btrim(coalesce(p_code, '')));
+
+  -- 双桶：3/分 + 20/小时（两个桶都计数，失败同样计入）
+  if private.rate_limited('space:join', v_uid, 3, 60, 20, 3600) then
+    perform private.audit_event('space.join', v_uid, v_code, 'rate_limited', null);
+    return jsonb_build_object('ok', false, 'code', 'rate_limited');
+  end if;
+
+  -- ------------------------------------------------------------------
+  -- REV3（P0-2）：参数校验全部前移 —— 成员写之前零 DML
+  -- ------------------------------------------------------------------
+
+  -- REV3（三.1）：非法 role 拒绝（与 create 对齐；缺省未传仍为 'her'）
+  if p_role is null or p_role not in ('her','him') then
+    perform private.audit_event('space.join', v_uid, v_code, 'invalid_role', null);
+    return jsonb_build_object('ok', false, 'code', 'invalid_role');
+  end if;
+  v_role := p_role;
+
+  if p_nickname is null or length(btrim(p_nickname)) = 0 or length(p_nickname) > 24 then
+    perform private.audit_event('space.join', v_uid, v_code, 'invalid_nickname', null);
+    return jsonb_build_object('ok', false, 'code', 'invalid_nickname');
+  end if;
+  if p_start_weight is not null and (p_start_weight < 20 or p_start_weight > 400) then
+    perform private.audit_event('space.join', v_uid, v_code, 'invalid_weight', null);
+    return jsonb_build_object('ok', false, 'code', 'invalid_weight');
+  end if;
+  if p_target_weight is not null and (p_target_weight < 20 or p_target_weight > 400) then
+    perform private.audit_event('space.join', v_uid, v_code, 'invalid_weight', null);
+    return jsonb_build_object('ok', false, 'code', 'invalid_weight');
+  end if;
+
+  -- 入口锁：锁住 spaces 行，与 dissolve 互斥（P1-4）
+  select true, s.archived_at into v_exists, v_arch
+    from public.spaces s
+   where s.code = v_code
+     for update;
+
+  -- 持锁后重新判定：不存在 与 已归档 必须同一语义（P0-5 同理）
+  if v_exists is null or v_arch is not null then
+    perform private.audit_event('space.join', v_uid, v_code, 'invalid_code', null);
+    return jsonb_build_object('ok', false, 'code', 'invalid_code');
+  end if;
+
+  -- 唯一的成员写：upsert（新成员插入 / 已退出成员复活同一行）
+  insert into public.space_members (space_id, user_id, role)
+  values (v_code, v_uid, 'member')
+  on conflict (space_id, user_id) do update
+     set left_at = null, joined_at = now()
+   where public.space_members.left_at is not null;
+
+  select exists (
+    select 1 from public.space_members m
+     where m.space_id = v_code and m.user_id = v_uid and m.left_at is null
+  ) into v_active;
+
+  -- 防御性分支：当前顺序下 upsert 后 v_active 恒为 true
+  -- （不存在 → 插入即 active；已退出 → 复活；已 active → 无行变更但仍 active）。
+  -- 保留该分支作为不变量哨兵：一旦未来修改 upsert 语义，此处必须先失败。
+  if not v_active then
+    perform private.audit_event('space.join', v_uid, v_code, 'join_failed', null);
+    return jsonb_build_object('ok', false, 'code', 'join_failed');
+  end if;
+
+  -- D1：加入即建/恢复档案（D1b 后客户端已无 profiles INSERT 权限）
+  insert into public.profiles (owner_id, owner_name, space_id, nickname, role, start_weight, target_weight)
+  values (v_uid, p_nickname, v_code, p_nickname, v_role, p_start_weight, p_target_weight)
+  on conflict (owner_id, space_id) do update
+     set nickname      = excluded.nickname,
+         role          = excluded.role,
+         start_weight  = coalesce(excluded.start_weight,  public.profiles.start_weight),
+         target_weight = coalesce(excluded.target_weight, public.profiles.target_weight);
+
+  perform private.audit_event('space.join', v_uid, v_code, 'ok', null);
+  return jsonb_build_object('ok', true, 'code', 'joined', 'space_id', v_code);
+end;
+$$;
+
+
+ALTER FUNCTION public.rpc_join_space(p_code text, p_nickname text, p_role text, p_start_weight numeric, p_target_weight numeric) OWNER TO postgres;
+
+--
+-- Name: rpc_leave_space(text); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.rpc_leave_space(p_code text) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO ''
+    AS $$
+declare
+  v_uid      text;
+  v_code     text;
+  v_arch     timestamptz;
+  v_owner    text;
+  v_exists   boolean;
+  v_active   integer;
+begin
+  v_uid := (select auth.uid())::text;
+  if v_uid is null then
+    return jsonb_build_object('ok', false, 'code', 'unauthenticated');
+  end if;
+
+  v_code := upper(btrim(coalesce(p_code, '')));
+
+  -- REV3（三.4）：真单桶 10/小时（v2 双桶放行次数同为 10，但双行冗余写入）
+  if private.bump_rate('space:leave', v_uid, 10, 3600) > 10 then
+    perform private.audit_event('space.leave', v_uid, v_code, 'rate_limited', null);
+    return jsonb_build_object('ok', false, 'code', 'rate_limited');
+  end if;
+
+  select true, s.archived_at, s.owner_user_id into v_exists, v_arch, v_owner
+    from public.spaces s
+   where s.code = v_code
+     for update;
+
+  if v_exists is null or v_arch is not null then
+    perform private.audit_event('space.leave', v_uid, v_code, 'invalid_code', null);
+    return jsonb_build_object('ok', false, 'code', 'invalid_code');
+  end if;
+
+  if not exists (
+    select 1 from public.space_members m
+     where m.space_id = v_code and m.user_id = v_uid and m.left_at is null
+  ) then
+    -- 幂等：已退出视为成功（不重复计数、不重复审计为失败）
+    perform private.audit_event('space.leave', v_uid, v_code, 'already_left', null);
+    return jsonb_build_object('ok', true, 'code', 'already_left');
+  end if;
+
+  if v_owner = v_uid then
+    perform private.audit_event('space.leave', v_uid, v_code, 'owner_rejected', null);
+    return jsonb_build_object('ok', false, 'code', 'owner_must_dissolve');
+  end if;
+
+  select count(*) into v_active
+    from public.space_members m
+   where m.space_id = v_code and m.left_at is null;
+
+  if v_active <= 1 then
+    perform private.audit_event('space.leave', v_uid, v_code, 'last_member', null);
+    return jsonb_build_object('ok', false, 'code', 'last_member');
+  end if;
+
+  update public.space_members
+     set left_at = now()
+   where space_id = v_code and user_id = v_uid and left_at is null;
+
+  delete from public.profiles where owner_id = v_uid and space_id = v_code;
+
+  perform private.audit_event('space.leave', v_uid, v_code, 'ok', null);
+  return jsonb_build_object('ok', true, 'code', 'left');
+end;
+$$;
+
+
+ALTER FUNCTION public.rpc_leave_space(p_code text) OWNER TO postgres;
+
+--
+-- Name: rpc_reward_create(text, text, numeric, text, text, text); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.rpc_reward_create(p_space_id text, p_condition_text text, p_target_weight numeric, p_prize text, p_promise_by text, p_owner_name text DEFAULT NULL::text) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO ''
+    AS $$
+declare
+  v_uid  text;
+  v_code text;
+  v_id   bigint;
+begin
+  v_uid := (select auth.uid())::text;
+  if v_uid is null then
+    return jsonb_build_object('ok', false, 'code', 'unauthenticated');
+  end if;
+
+  -- REV3（三.4）：真单桶 20/小时
+  if private.bump_rate('reward:create', v_uid, 20, 3600) > 20 then
+    perform private.audit_event('reward.create', v_uid, null, 'rate_limited', null);
+    return jsonb_build_object('ok', false, 'code', 'rate_limited');
+  end if;
+
+  v_code := upper(btrim(coalesce(p_space_id, '')));
+
+  if not private.is_space_member_of(v_uid, v_code) then
+    perform private.audit_event('reward.create', v_uid, v_code, 'not_member', null);
+    return jsonb_build_object('ok', false, 'code', 'not_member');
+  end if;
+  if p_promise_by is null or p_promise_by = v_uid
+     or not private.is_space_member_of(p_promise_by, v_code) then
+    perform private.audit_event('reward.create', v_uid, v_code, 'invalid_promisor', null);
+    return jsonb_build_object('ok', false, 'code', 'invalid_promisor');
+  end if;
+  if p_condition_text is null or length(btrim(p_condition_text)) = 0
+     or length(p_condition_text) > 200 then
+    perform private.audit_event('reward.create', v_uid, v_code, 'invalid_condition', null);
+    return jsonb_build_object('ok', false, 'code', 'invalid_condition');
+  end if;
+  if p_owner_name is not null and length(p_owner_name) > 24 then
+    perform private.audit_event('reward.create', v_uid, v_code, 'invalid_owner_name', null);
+    return jsonb_build_object('ok', false, 'code', 'invalid_owner_name');
+  end if;
+  if p_prize is null or length(btrim(p_prize)) = 0 or length(p_prize) > 30 then
+    perform private.audit_event('reward.create', v_uid, v_code, 'invalid_prize', null);
+    return jsonb_build_object('ok', false, 'code', 'invalid_prize');
+  end if;
+  if p_target_weight is not null and (p_target_weight < 20 or p_target_weight > 400) then
+    perform private.audit_event('reward.create', v_uid, v_code, 'invalid_weight', null);
+    return jsonb_build_object('ok', false, 'code', 'invalid_weight');
+  end if;
+
+  insert into public.rewards
+    (owner_id, owner_name, space_id, condition_text, target_weight, prize, promise_by, status)
+  values
+    (v_uid, p_owner_name, v_code, p_condition_text, p_target_weight, p_prize, p_promise_by, 'active')
+  returning id into v_id;
+
+  perform private.audit_event('reward.create', v_uid, v_id::text, 'ok', null);
+  return jsonb_build_object('ok', true, 'code', 'created', 'id', v_id);
+end;
+$$;
+
+
+ALTER FUNCTION public.rpc_reward_create(p_space_id text, p_condition_text text, p_target_weight numeric, p_prize text, p_promise_by text, p_owner_name text) OWNER TO postgres;
+
+--
+-- Name: rpc_reward_delete(bigint); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.rpc_reward_delete(p_reward_id bigint) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO ''
+    AS $$
+declare
+  v_uid  text;
+  v_r    record;
+  v_rows integer;
+begin
+  v_uid := (select auth.uid())::text;
+  if v_uid is null then
+    return jsonb_build_object('ok', false, 'code', 'unauthenticated');
+  end if;
+
+  -- REV3（三.4）：真单桶 20/小时
+  if private.bump_rate('reward:delete', v_uid, 20, 3600) > 20 then
+    perform private.audit_event('reward.delete', v_uid, p_reward_id::text, 'rate_limited', null);
+    return jsonb_build_object('ok', false, 'code', 'rate_limited');
+  end if;
+
+  select r.space_id, r.owner_id into v_r
+    from public.rewards r where r.id = p_reward_id
+     for update;
+
+  if v_r is null then
+    -- REV3（三.3）：幂等成功补审计（v2 此分支已认证但无 action_log）
+    perform private.audit_event('reward.delete', v_uid, p_reward_id::text, 'not_found', null);
+    return jsonb_build_object('ok', true, 'code', 'not_found');   -- 幂等
+  end if;
+  if v_r.owner_id is distinct from v_uid then
+    perform private.audit_event('reward.delete', v_uid, p_reward_id::text, 'not_owner', null);
+    return jsonb_build_object('ok', false, 'code', 'not_owner');
+  end if;
+  if not private.is_space_member_of(v_uid, v_r.space_id) then
+    perform private.audit_event('reward.delete', v_uid, p_reward_id::text, 'not_member', null);
+    return jsonb_build_object('ok', false, 'code', 'not_member');
+  end if;
+
+  delete from public.rewards where id = p_reward_id;
+  get diagnostics v_rows = row_count;
+
+  perform private.audit_event('reward.delete', v_uid, p_reward_id::text, 'ok', null);
+  return jsonb_build_object('ok', true, 'code', 'deleted', 'deleted', v_rows);
+end;
+$$;
+
+
+ALTER FUNCTION public.rpc_reward_delete(p_reward_id bigint) OWNER TO postgres;
+
+--
+-- Name: rpc_reward_mark_pending(bigint); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.rpc_reward_mark_pending(p_reward_id bigint) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO ''
+    AS $$
+declare
+  v_uid    text;
+  v_r      record;
+  v_w      numeric(5,1);
+  v_rows   integer;
+begin
+  v_uid := (select auth.uid())::text;
+  if v_uid is null then
+    return jsonb_build_object('ok', false, 'code', 'unauthenticated');
+  end if;
+
+  -- REV3（三.4）：真单桶 30/小时
+  if private.bump_rate('reward:pending', v_uid, 30, 3600) > 30 then
+    perform private.audit_event('reward.mark_pending', v_uid, p_reward_id::text, 'rate_limited', null);
+    return jsonb_build_object('ok', false, 'code', 'rate_limited');
+  end if;
+
+  select r.id, r.space_id, r.owner_id, r.status, r.target_weight into v_r
+    from public.rewards r where r.id = p_reward_id
+     for update;                       -- 行锁：并发重复调用串行化
+
+  if v_r is null then
+    perform private.audit_event('reward.mark_pending', v_uid, p_reward_id::text, 'not_found', null);
+    return jsonb_build_object('ok', false, 'code', 'not_found');
+  end if;
+  if not private.is_space_member_of(v_uid, v_r.space_id) then
+    perform private.audit_event('reward.mark_pending', v_uid, p_reward_id::text, 'not_member', null);
+    return jsonb_build_object('ok', false, 'code', 'not_member');
+  end if;
+
+  -- 持锁后重新判断状态（幂等）
+  if v_r.status <> 'active' then
+    -- REV3（三.3）：幂等成功补审计（v2 此分支已认证但无 action_log）
+    perform private.audit_event('reward.mark_pending', v_uid, p_reward_id::text, 'already', null);
+    return jsonb_build_object('ok', true, 'code', 'already', 'status', v_r.status);
+  end if;
+  if v_r.target_weight is null then
+    perform private.audit_event('reward.mark_pending', v_uid, p_reward_id::text, 'no_target', null);
+    return jsonb_build_object('ok', false, 'code', 'no_target');
+  end if;
+
+  select r2.weight into v_w
+    from public.records r2
+   where r2.owner_id = v_r.owner_id and r2.space_id = v_r.space_id
+   order by r2.record_date desc, r2.id desc
+   limit 1;
+
+  if v_w is null or v_w > v_r.target_weight then
+    perform private.audit_event('reward.mark_pending', v_uid, p_reward_id::text, 'target_not_met', null);
+    return jsonb_build_object('ok', false, 'code', 'target_not_met');
+  end if;
+
+  update public.rewards set status = 'pending', achieved_at = now()
+   where id = p_reward_id and status = 'active';
+
+  get diagnostics v_rows = row_count;
+  if v_rows <> 1 then
+    -- 理论上不可达（已持锁）；保守返回当前状态，避免"报成功但没写"
+    perform private.audit_event('reward.mark_pending', v_uid, p_reward_id::text, 'race_lost', null);
+    return jsonb_build_object('ok', true, 'code', 'already', 'status', 'pending');
+  end if;
+
+  perform private.audit_event('reward.mark_pending', v_uid, p_reward_id::text, 'ok', null);
+  return jsonb_build_object('ok', true, 'code', 'pending');
+end;
+$$;
+
+
+ALTER FUNCTION public.rpc_reward_mark_pending(p_reward_id bigint) OWNER TO postgres;
+
+--
+-- Name: rpc_reward_redeem(bigint); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.rpc_reward_redeem(p_reward_id bigint) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO ''
+    AS $$
+declare
+  v_uid  text;
+  v_r    record;
+  v_rows integer;
+begin
+  v_uid := (select auth.uid())::text;
+  if v_uid is null then
+    return jsonb_build_object('ok', false, 'code', 'unauthenticated');
+  end if;
+
+  -- REV3（三.4）：真单桶 30/小时
+  if private.bump_rate('reward:redeem', v_uid, 30, 3600) > 30 then
+    perform private.audit_event('reward.redeem', v_uid, p_reward_id::text, 'rate_limited', null);
+    return jsonb_build_object('ok', false, 'code', 'rate_limited');
+  end if;
+
+  select r.id, r.space_id, r.promise_by, r.status, r.redeemed_at into v_r
+    from public.rewards r where r.id = p_reward_id
+     for update;
+
+  if v_r is null then
+    perform private.audit_event('reward.redeem', v_uid, p_reward_id::text, 'not_found', null);
+    return jsonb_build_object('ok', false, 'code', 'not_found');
+  end if;
+  if v_r.promise_by is distinct from v_uid then
+    perform private.audit_event('reward.redeem', v_uid, p_reward_id::text, 'not_promisor', null);
+    return jsonb_build_object('ok', false, 'code', 'not_promisor');
+  end if;
+  if not private.is_space_member_of(v_uid, v_r.space_id) then
+    perform private.audit_event('reward.redeem', v_uid, p_reward_id::text, 'not_member', null);
+    return jsonb_build_object('ok', false, 'code', 'not_member');
+  end if;
+  if v_r.status = 'done' then
+    -- REV3（三.3）：幂等成功补审计（v2 此分支已认证但无 action_log）
+    perform private.audit_event('reward.redeem', v_uid, p_reward_id::text, 'already', null);
+    return jsonb_build_object('ok', true, 'code', 'already', 'status', 'done',
+                              'redeemed_at', v_r.redeemed_at);
+  end if;
+  if v_r.status <> 'pending' then
+    perform private.audit_event('reward.redeem', v_uid, p_reward_id::text, 'invalid_state', null);
+    return jsonb_build_object('ok', false, 'code', 'invalid_state');
+  end if;
+
+  update public.rewards set status = 'done', redeemed_at = now()
+   where id = p_reward_id and status = 'pending';
+
+  get diagnostics v_rows = row_count;
+  if v_rows <> 1 then
+    perform private.audit_event('reward.redeem', v_uid, p_reward_id::text, 'race_lost', null);
+    return jsonb_build_object('ok', true, 'code', 'already', 'status', 'done');
+  end if;
+
+  perform private.audit_event('reward.redeem', v_uid, p_reward_id::text, 'ok', null);
+  return jsonb_build_object('ok', true, 'code', 'done');
+end;
+$$;
+
+
+ALTER FUNCTION public.rpc_reward_redeem(p_reward_id bigint) OWNER TO postgres;
+
+--
+-- Name: rpc_space_peek(text); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.rpc_space_peek(p_code text) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO ''
+    AS $$
+declare
+  v_uid    text;
+  v_code   text;
+  v_arch   timestamptz;
+  v_n      integer;
+  v_names  jsonb;
+begin
+  v_uid := (select auth.uid())::text;
+  if v_uid is null then
+    return jsonb_build_object('ok', false, 'code', 'unauthenticated');
+  end if;
+
+  v_code := upper(btrim(coalesce(p_code, '')));
+
+  if private.rate_limited('space:peek', v_uid, 5, 60, 30, 3600) then
+    perform private.audit_event('space.peek', v_uid, v_code, 'rate_limited', null);
+    return jsonb_build_object('ok', false, 'code', 'rate_limited');
+  end if;
+
+  -- REV2 修正：**不做格式前置校验**。
+  -- v1 曾在此按新码正则提前拒绝，但历史导入的空间码可能不合规
+  -- （NOT VALID 阶段 D/F 之前），格式闸门会让合法的旧空间无法 peek。
+  -- 归一化后未命中的码自然落入"不存在 → invalid_code"，语义一致；
+  -- 任意长输入不会进入 action_log（audit_event 内截断 24 字符）。
+
+  select s.archived_at into v_arch from public.spaces s where s.code = v_code;
+
+  -- 不存在(FOUND=false) 与 已归档 统一语义
+  if not found or v_arch is not null then
+    perform private.audit_event('space.peek', v_uid, v_code, 'invalid_code', null);
+    return jsonb_build_object('ok', false, 'code', 'invalid_code');
+  end if;
+
+  -- 空成员空间（P0-6 / REV2 定案）：count=0、names=[]，**不是错误**。
+  --   该状态只在历史导入可达（verified 空间的 owner 不可退出、
+  --   末位成员退出被拒、归档空间已被上面拦掉）。
+  --   peek 的语义是"该码当前有多少人"，0 是合法答案；是否加入由用户决定。
+  select count(*)::integer,
+         coalesce(
+           jsonb_agg(left(coalesce(nullif(btrim(p.nickname), ''), '?'), 1) || '**' order by m.id),
+           '[]'::jsonb
+         )
+    into v_n, v_names
+    from public.space_members m
+    left join public.profiles p
+           on p.space_id = m.space_id and p.owner_id = m.user_id
+   where m.space_id = v_code
+     and m.left_at is null;
+
+  perform private.audit_event('space.peek', v_uid, v_code, 'ok',
+                              jsonb_build_object('count', v_n));
+  return jsonb_build_object('ok', true, 'code', 'found', 'count', v_n, 'names', v_names);
+end;
+$$;
+
+
+ALTER FUNCTION public.rpc_space_peek(p_code text) OWNER TO postgres;
+
+SET default_tablespace = '';
+
+SET default_table_access_method = heap;
+
+--
+-- Name: action_log; Type: TABLE; Schema: migration; Owner: postgres
+--
+
+CREATE TABLE migration.action_log (
+    id bigint NOT NULL,
+    action text NOT NULL,
+    actor text,
+    target text,
+    result text NOT NULL,
+    detail jsonb,
+    at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+ALTER TABLE migration.action_log OWNER TO postgres;
+
+--
+-- Name: action_log_id_seq; Type: SEQUENCE; Schema: migration; Owner: postgres
+--
+
+ALTER TABLE migration.action_log ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME migration.action_log_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+
+--
+-- Name: rate_hits; Type: TABLE; Schema: private; Owner: postgres
+--
+
+CREATE TABLE private.rate_hits (
+    scope text NOT NULL,
+    subject text NOT NULL,
+    window_start timestamp with time zone NOT NULL,
+    cnt integer DEFAULT 0 NOT NULL
+);
+
+
+ALTER TABLE private.rate_hits OWNER TO postgres;
+
+--
+-- Name: messages; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.messages (
+    id bigint NOT NULL,
+    owner_id text DEFAULT auth.uid() NOT NULL,
+    owner_name text,
+    space_id text NOT NULL,
+    text text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+ALTER TABLE public.messages OWNER TO postgres;
+
+--
+-- Name: messages_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+ALTER TABLE public.messages ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME public.messages_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+
+--
+-- Name: profiles; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.profiles (
+    id bigint NOT NULL,
+    owner_id text DEFAULT auth.uid() NOT NULL,
+    owner_name text,
+    space_id text NOT NULL,
+    nickname text NOT NULL,
+    role text DEFAULT 'her'::text NOT NULL,
+    start_weight numeric(5,1),
+    target_weight numeric(5,1),
+    target_date date,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+ALTER TABLE public.profiles OWNER TO postgres;
+
+--
+-- Name: profiles_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+ALTER TABLE public.profiles ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME public.profiles_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+
+--
+-- Name: records; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.records (
+    id bigint NOT NULL,
+    owner_id text DEFAULT auth.uid() NOT NULL,
+    owner_name text,
+    space_id text NOT NULL,
+    record_date date NOT NULL,
+    weight numeric(5,1) NOT NULL,
+    tags jsonb DEFAULT '[]'::jsonb,
+    todo_done jsonb DEFAULT '[]'::jsonb,
+    mood text,
+    note text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+ALTER TABLE public.records OWNER TO postgres;
+
+--
+-- Name: records_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+ALTER TABLE public.records ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME public.records_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+
+--
+-- Name: rewards; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.rewards (
+    id bigint NOT NULL,
+    owner_id text DEFAULT auth.uid() NOT NULL,
+    owner_name text,
+    space_id text NOT NULL,
+    condition_text text NOT NULL,
+    target_weight numeric(5,1),
+    prize text NOT NULL,
+    promise_by text NOT NULL,
+    status text DEFAULT 'active'::text NOT NULL,
+    achieved_at timestamp with time zone,
+    redeemed_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT rewards_status_chk CHECK ((status = ANY (ARRAY['active'::text, 'pending'::text, 'done'::text]))),
+    CONSTRAINT rewards_ts_chk CHECK ((((status = 'active'::text) AND (achieved_at IS NULL) AND (redeemed_at IS NULL)) OR ((status = 'pending'::text) AND (achieved_at IS NOT NULL) AND (redeemed_at IS NULL)) OR ((status = 'done'::text) AND (achieved_at IS NOT NULL) AND (redeemed_at IS NOT NULL))))
+);
+
+
+ALTER TABLE public.rewards OWNER TO postgres;
+
+--
+-- Name: rewards_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+ALTER TABLE public.rewards ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME public.rewards_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+
+--
+-- Name: space_members; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.space_members (
+    id bigint NOT NULL,
+    space_id text NOT NULL,
+    user_id text NOT NULL,
+    role text DEFAULT 'member'::text NOT NULL,
+    joined_at timestamp with time zone DEFAULT now() NOT NULL,
+    left_at timestamp with time zone,
+    CONSTRAINT space_members_left_chk CHECK (((left_at IS NULL) OR (left_at >= joined_at))),
+    CONSTRAINT space_members_role_chk CHECK ((role = ANY (ARRAY['member'::text, 'admin'::text])))
+);
+
+
+ALTER TABLE public.space_members OWNER TO postgres;
+
+--
+-- Name: TABLE space_members; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON TABLE public.space_members IS '成员关系；退出=置 left_at（软退出），重新加入=复用同一行并复位 left_at。role 不承载 owner 语义。';
+
+
+--
+-- Name: space_members_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+ALTER TABLE public.space_members ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME public.space_members_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+
+--
+-- Name: spaces; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.spaces (
+    code text NOT NULL,
+    owner_status text DEFAULT 'unclaimed'::text NOT NULL,
+    owner_user_id text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    archived_at timestamp with time zone,
+    CONSTRAINT spaces_code_fmt_chk CHECK ((code ~ '^FIT-[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$'::text)),
+    CONSTRAINT spaces_owner_pair_chk CHECK ((((owner_status = 'verified'::text) AND (owner_user_id IS NOT NULL)) OR ((owner_status = 'unclaimed'::text) AND (owner_user_id IS NULL)))),
+    CONSTRAINT spaces_owner_status_chk CHECK ((owner_status = ANY (ARRAY['verified'::text, 'unclaimed'::text])))
+);
+
+
+ALTER TABLE public.spaces OWNER TO postgres;
+
+--
+-- Name: TABLE spaces; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON TABLE public.spaces IS '空间实体；code 全局唯一，一经创建不可修改（轮换=新建码映射，v2）';
+
+
+--
+-- Name: COLUMN spaces.owner_status; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.spaces.owner_status IS 'verified=已有可信 owner；unclaimed=历史空间待人工认领';
+
+
+--
+-- Name: COLUMN spaces.archived_at; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.spaces.archived_at IS '解散时间；非空即归档，join 一律拒绝';
+
+
+--
+-- Name: tags; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.tags (
+    id bigint NOT NULL,
+    owner_id text DEFAULT auth.uid() NOT NULL,
+    owner_name text,
+    space_id text NOT NULL,
+    text text NOT NULL,
+    sort integer DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+ALTER TABLE public.tags OWNER TO postgres;
+
+--
+-- Name: tags_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+ALTER TABLE public.tags ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME public.tags_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+
+--
+-- Name: todos; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.todos (
+    id bigint NOT NULL,
+    owner_id text DEFAULT auth.uid() NOT NULL,
+    owner_name text,
+    space_id text NOT NULL,
+    text text NOT NULL,
+    sort integer DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+ALTER TABLE public.todos OWNER TO postgres;
+
+--
+-- Name: todos_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+ALTER TABLE public.todos ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME public.todos_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+
+--
+-- Name: action_log action_log_pkey; Type: CONSTRAINT; Schema: migration; Owner: postgres
+--
+
+ALTER TABLE ONLY migration.action_log
+    ADD CONSTRAINT action_log_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: rate_hits rate_hits_pkey; Type: CONSTRAINT; Schema: private; Owner: postgres
+--
+
+ALTER TABLE ONLY private.rate_hits
+    ADD CONSTRAINT rate_hits_pkey PRIMARY KEY (scope, subject, window_start);
+
+
+--
+-- Name: messages messages_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.messages
+    ADD CONSTRAINT messages_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: profiles profiles_owner_space_key; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.profiles
+    ADD CONSTRAINT profiles_owner_space_key UNIQUE (owner_id, space_id);
+
+
+--
+-- Name: profiles profiles_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.profiles
+    ADD CONSTRAINT profiles_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: records records_owner_date_space_key; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.records
+    ADD CONSTRAINT records_owner_date_space_key UNIQUE (owner_id, record_date, space_id);
+
+
+--
+-- Name: records records_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.records
+    ADD CONSTRAINT records_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: rewards rewards_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.rewards
+    ADD CONSTRAINT rewards_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: space_members space_members_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.space_members
+    ADD CONSTRAINT space_members_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: space_members space_members_space_user_key; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.space_members
+    ADD CONSTRAINT space_members_space_user_key UNIQUE (space_id, user_id);
+
+
+--
+-- Name: spaces spaces_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.spaces
+    ADD CONSTRAINT spaces_pkey PRIMARY KEY (code);
+
+
+--
+-- Name: tags tags_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.tags
+    ADD CONSTRAINT tags_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: todos todos_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.todos
+    ADD CONSTRAINT todos_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: action_log_at_idx; Type: INDEX; Schema: migration; Owner: postgres
+--
+
+CREATE INDEX action_log_at_idx ON migration.action_log USING btree (at DESC);
+
+
+--
+-- Name: messages_space_id_idx; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX messages_space_id_idx ON public.messages USING btree (space_id, id);
+
+
+--
+-- Name: records_space_date_idx; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX records_space_date_idx ON public.records USING btree (space_id, record_date);
+
+
+--
+-- Name: rewards_space_status_idx; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX rewards_space_status_idx ON public.rewards USING btree (space_id, status);
+
+
+--
+-- Name: space_members_active_space_idx; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX space_members_active_space_idx ON public.space_members USING btree (space_id) WHERE (left_at IS NULL);
+
+
+--
+-- Name: space_members_active_user_idx; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX space_members_active_user_idx ON public.space_members USING btree (user_id) WHERE (left_at IS NULL);
+
+
+--
+-- Name: tags_space_sort_idx; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX tags_space_sort_idx ON public.tags USING btree (space_id, sort, id);
+
+
+--
+-- Name: todos_space_sort_idx; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX todos_space_sort_idx ON public.todos USING btree (space_id, sort, id);
+
+
+--
+-- Name: space_members space_members_owner_guard_ct; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE CONSTRAINT TRIGGER space_members_owner_guard_ct AFTER INSERT OR DELETE OR UPDATE ON public.space_members DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION private.assert_member_owner_guard();
+
+
+--
+-- Name: spaces spaces_owner_member_ct; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE CONSTRAINT TRIGGER spaces_owner_member_ct AFTER INSERT OR UPDATE OF owner_user_id, owner_status, archived_at ON public.spaces DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION private.assert_space_owner_is_member();
+
+
+--
+-- Name: messages messages_space_fk; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.messages
+    ADD CONSTRAINT messages_space_fk FOREIGN KEY (space_id) REFERENCES public.spaces(code);
+
+
+--
+-- Name: profiles profiles_space_fk; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.profiles
+    ADD CONSTRAINT profiles_space_fk FOREIGN KEY (space_id) REFERENCES public.spaces(code);
+
+
+--
+-- Name: records records_space_fk; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.records
+    ADD CONSTRAINT records_space_fk FOREIGN KEY (space_id) REFERENCES public.spaces(code);
+
+
+--
+-- Name: rewards rewards_space_fk; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.rewards
+    ADD CONSTRAINT rewards_space_fk FOREIGN KEY (space_id) REFERENCES public.spaces(code);
+
+
+--
+-- Name: space_members space_members_space_fk; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.space_members
+    ADD CONSTRAINT space_members_space_fk FOREIGN KEY (space_id) REFERENCES public.spaces(code) ON DELETE RESTRICT;
+
+
+--
+-- Name: tags tags_space_fk; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.tags
+    ADD CONSTRAINT tags_space_fk FOREIGN KEY (space_id) REFERENCES public.spaces(code);
+
+
+--
+-- Name: todos todos_space_fk; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.todos
+    ADD CONSTRAINT todos_space_fk FOREIGN KEY (space_id) REFERENCES public.spaces(code);
+
+
+--
+-- Name: messages; Type: ROW SECURITY; Schema: public; Owner: postgres
+--
+
+ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: messages messages_insert; Type: POLICY; Schema: public; Owner: postgres
+--
+
+CREATE POLICY messages_insert ON public.messages FOR INSERT TO authenticated WITH CHECK (((owner_id = (( SELECT auth.uid() AS uid))::text) AND private.is_space_member(space_id)));
+
+
+--
+-- Name: messages messages_select; Type: POLICY; Schema: public; Owner: postgres
+--
+
+CREATE POLICY messages_select ON public.messages FOR SELECT TO authenticated USING (private.is_space_member(space_id));
+
+
+--
+-- Name: profiles; Type: ROW SECURITY; Schema: public; Owner: postgres
+--
+
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: profiles profiles_insert; Type: POLICY; Schema: public; Owner: postgres
+--
+
+CREATE POLICY profiles_insert ON public.profiles FOR INSERT TO authenticated WITH CHECK (((owner_id = (( SELECT auth.uid() AS uid))::text) AND private.is_space_member(space_id)));
+
+
+--
+-- Name: profiles profiles_select; Type: POLICY; Schema: public; Owner: postgres
+--
+
+CREATE POLICY profiles_select ON public.profiles FOR SELECT TO authenticated USING (private.is_space_member(space_id));
+
+
+--
+-- Name: profiles profiles_update; Type: POLICY; Schema: public; Owner: postgres
+--
+
+CREATE POLICY profiles_update ON public.profiles FOR UPDATE TO authenticated USING (((owner_id = (( SELECT auth.uid() AS uid))::text) AND private.is_space_member(space_id))) WITH CHECK ((owner_id = (( SELECT auth.uid() AS uid))::text));
+
+
+--
+-- Name: records; Type: ROW SECURITY; Schema: public; Owner: postgres
+--
+
+ALTER TABLE public.records ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: records records_insert; Type: POLICY; Schema: public; Owner: postgres
+--
+
+CREATE POLICY records_insert ON public.records FOR INSERT TO authenticated WITH CHECK (((owner_id = (( SELECT auth.uid() AS uid))::text) AND private.is_space_member(space_id)));
+
+
+--
+-- Name: records records_select; Type: POLICY; Schema: public; Owner: postgres
+--
+
+CREATE POLICY records_select ON public.records FOR SELECT TO authenticated USING (private.is_space_member(space_id));
+
+
+--
+-- Name: records records_update; Type: POLICY; Schema: public; Owner: postgres
+--
+
+CREATE POLICY records_update ON public.records FOR UPDATE TO authenticated USING (((owner_id = (( SELECT auth.uid() AS uid))::text) AND private.is_space_member(space_id))) WITH CHECK ((owner_id = (( SELECT auth.uid() AS uid))::text));
+
+
+--
+-- Name: rewards; Type: ROW SECURITY; Schema: public; Owner: postgres
+--
+
+ALTER TABLE public.rewards ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: rewards rewards_select; Type: POLICY; Schema: public; Owner: postgres
+--
+
+CREATE POLICY rewards_select ON public.rewards FOR SELECT TO authenticated USING (private.is_space_member(space_id));
+
+
+--
+-- Name: space_members; Type: ROW SECURITY; Schema: public; Owner: postgres
+--
+
+ALTER TABLE public.space_members ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: spaces; Type: ROW SECURITY; Schema: public; Owner: postgres
+--
+
+ALTER TABLE public.spaces ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: tags; Type: ROW SECURITY; Schema: public; Owner: postgres
+--
+
+ALTER TABLE public.tags ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: tags tags_delete; Type: POLICY; Schema: public; Owner: postgres
+--
+
+CREATE POLICY tags_delete ON public.tags FOR DELETE TO authenticated USING (((owner_id = (( SELECT auth.uid() AS uid))::text) AND private.is_space_member(space_id)));
+
+
+--
+-- Name: tags tags_insert; Type: POLICY; Schema: public; Owner: postgres
+--
+
+CREATE POLICY tags_insert ON public.tags FOR INSERT TO authenticated WITH CHECK (((owner_id = (( SELECT auth.uid() AS uid))::text) AND private.is_space_member(space_id)));
+
+
+--
+-- Name: tags tags_select; Type: POLICY; Schema: public; Owner: postgres
+--
+
+CREATE POLICY tags_select ON public.tags FOR SELECT TO authenticated USING (private.is_space_member(space_id));
+
+
+--
+-- Name: todos; Type: ROW SECURITY; Schema: public; Owner: postgres
+--
+
+ALTER TABLE public.todos ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: todos todos_delete; Type: POLICY; Schema: public; Owner: postgres
+--
+
+CREATE POLICY todos_delete ON public.todos FOR DELETE TO authenticated USING (((owner_id = (( SELECT auth.uid() AS uid))::text) AND private.is_space_member(space_id)));
+
+
+--
+-- Name: todos todos_insert; Type: POLICY; Schema: public; Owner: postgres
+--
+
+CREATE POLICY todos_insert ON public.todos FOR INSERT TO authenticated WITH CHECK (((owner_id = (( SELECT auth.uid() AS uid))::text) AND private.is_space_member(space_id)));
+
+
+--
+-- Name: todos todos_select; Type: POLICY; Schema: public; Owner: postgres
+--
+
+CREATE POLICY todos_select ON public.todos FOR SELECT TO authenticated USING (private.is_space_member(space_id));
+
+
+--
+-- Name: SCHEMA private; Type: ACL; Schema: -; Owner: postgres
+--
+
+GRANT USAGE ON SCHEMA private TO authenticated;
+
+
+--
+-- Name: SCHEMA public; Type: ACL; Schema: -; Owner: pg_database_owner
+--
+
+GRANT USAGE ON SCHEMA public TO postgres;
+GRANT USAGE ON SCHEMA public TO anon;
+GRANT USAGE ON SCHEMA public TO authenticated;
+GRANT USAGE ON SCHEMA public TO service_role;
+
+
+--
+-- Name: FUNCTION audit_event(p_action text, p_actor text, p_target text, p_result text, p_detail jsonb); Type: ACL; Schema: private; Owner: postgres
+--
+
+REVOKE ALL ON FUNCTION private.audit_event(p_action text, p_actor text, p_target text, p_result text, p_detail jsonb) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION bump_rate(p_scope text, p_subject text, p_limit integer, p_window_seconds integer); Type: ACL; Schema: private; Owner: postgres
+--
+
+REVOKE ALL ON FUNCTION private.bump_rate(p_scope text, p_subject text, p_limit integer, p_window_seconds integer) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION is_space_member(p_code text); Type: ACL; Schema: private; Owner: postgres
+--
+
+REVOKE ALL ON FUNCTION private.is_space_member(p_code text) FROM PUBLIC;
+GRANT ALL ON FUNCTION private.is_space_member(p_code text) TO authenticated;
+
+
+--
+-- Name: FUNCTION is_space_member_of(p_user text, p_code text); Type: ACL; Schema: private; Owner: postgres
+--
+
+REVOKE ALL ON FUNCTION private.is_space_member_of(p_user text, p_code text) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION my_space_ids(); Type: ACL; Schema: private; Owner: postgres
+--
+
+REVOKE ALL ON FUNCTION private.my_space_ids() FROM PUBLIC;
+GRANT ALL ON FUNCTION private.my_space_ids() TO authenticated;
+
+
+--
+-- Name: FUNCTION rate_limited(p_scope text, p_subject text, p_limit_a integer, p_window_a integer, p_limit_b integer, p_window_b integer); Type: ACL; Schema: private; Owner: postgres
+--
+
+REVOKE ALL ON FUNCTION private.rate_limited(p_scope text, p_subject text, p_limit_a integer, p_window_a integer, p_limit_b integer, p_window_b integer) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION rpc_create_space(p_nickname text, p_role text, p_start_weight numeric, p_target_weight numeric); Type: ACL; Schema: public; Owner: postgres
+--
+
+REVOKE ALL ON FUNCTION public.rpc_create_space(p_nickname text, p_role text, p_start_weight numeric, p_target_weight numeric) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.rpc_create_space(p_nickname text, p_role text, p_start_weight numeric, p_target_weight numeric) TO authenticated;
+GRANT ALL ON FUNCTION public.rpc_create_space(p_nickname text, p_role text, p_start_weight numeric, p_target_weight numeric) TO service_role;
+
+
+--
+-- Name: FUNCTION rpc_dissolve_space(p_code text); Type: ACL; Schema: public; Owner: postgres
+--
+
+REVOKE ALL ON FUNCTION public.rpc_dissolve_space(p_code text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.rpc_dissolve_space(p_code text) TO authenticated;
+GRANT ALL ON FUNCTION public.rpc_dissolve_space(p_code text) TO service_role;
+
+
+--
+-- Name: FUNCTION rpc_join_space(p_code text, p_nickname text, p_role text, p_start_weight numeric, p_target_weight numeric); Type: ACL; Schema: public; Owner: postgres
+--
+
+REVOKE ALL ON FUNCTION public.rpc_join_space(p_code text, p_nickname text, p_role text, p_start_weight numeric, p_target_weight numeric) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.rpc_join_space(p_code text, p_nickname text, p_role text, p_start_weight numeric, p_target_weight numeric) TO authenticated;
+GRANT ALL ON FUNCTION public.rpc_join_space(p_code text, p_nickname text, p_role text, p_start_weight numeric, p_target_weight numeric) TO service_role;
+
+
+--
+-- Name: FUNCTION rpc_leave_space(p_code text); Type: ACL; Schema: public; Owner: postgres
+--
+
+REVOKE ALL ON FUNCTION public.rpc_leave_space(p_code text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.rpc_leave_space(p_code text) TO authenticated;
+GRANT ALL ON FUNCTION public.rpc_leave_space(p_code text) TO service_role;
+
+
+--
+-- Name: FUNCTION rpc_reward_create(p_space_id text, p_condition_text text, p_target_weight numeric, p_prize text, p_promise_by text, p_owner_name text); Type: ACL; Schema: public; Owner: postgres
+--
+
+REVOKE ALL ON FUNCTION public.rpc_reward_create(p_space_id text, p_condition_text text, p_target_weight numeric, p_prize text, p_promise_by text, p_owner_name text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.rpc_reward_create(p_space_id text, p_condition_text text, p_target_weight numeric, p_prize text, p_promise_by text, p_owner_name text) TO authenticated;
+GRANT ALL ON FUNCTION public.rpc_reward_create(p_space_id text, p_condition_text text, p_target_weight numeric, p_prize text, p_promise_by text, p_owner_name text) TO service_role;
+
+
+--
+-- Name: FUNCTION rpc_reward_delete(p_reward_id bigint); Type: ACL; Schema: public; Owner: postgres
+--
+
+REVOKE ALL ON FUNCTION public.rpc_reward_delete(p_reward_id bigint) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.rpc_reward_delete(p_reward_id bigint) TO authenticated;
+GRANT ALL ON FUNCTION public.rpc_reward_delete(p_reward_id bigint) TO service_role;
+
+
+--
+-- Name: FUNCTION rpc_reward_mark_pending(p_reward_id bigint); Type: ACL; Schema: public; Owner: postgres
+--
+
+REVOKE ALL ON FUNCTION public.rpc_reward_mark_pending(p_reward_id bigint) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.rpc_reward_mark_pending(p_reward_id bigint) TO authenticated;
+GRANT ALL ON FUNCTION public.rpc_reward_mark_pending(p_reward_id bigint) TO service_role;
+
+
+--
+-- Name: FUNCTION rpc_reward_redeem(p_reward_id bigint); Type: ACL; Schema: public; Owner: postgres
+--
+
+REVOKE ALL ON FUNCTION public.rpc_reward_redeem(p_reward_id bigint) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.rpc_reward_redeem(p_reward_id bigint) TO authenticated;
+GRANT ALL ON FUNCTION public.rpc_reward_redeem(p_reward_id bigint) TO service_role;
+
+
+--
+-- Name: FUNCTION rpc_space_peek(p_code text); Type: ACL; Schema: public; Owner: postgres
+--
+
+REVOKE ALL ON FUNCTION public.rpc_space_peek(p_code text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.rpc_space_peek(p_code text) TO authenticated;
+GRANT ALL ON FUNCTION public.rpc_space_peek(p_code text) TO service_role;
+
+
+--
+-- Name: TABLE messages; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT ALL ON TABLE public.messages TO service_role;
+GRANT SELECT ON TABLE public.messages TO authenticated;
+
+
+--
+-- Name: COLUMN messages.owner_id; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT INSERT(owner_id) ON TABLE public.messages TO authenticated;
+
+
+--
+-- Name: COLUMN messages.owner_name; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT INSERT(owner_name) ON TABLE public.messages TO authenticated;
+
+
+--
+-- Name: COLUMN messages.space_id; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT INSERT(space_id) ON TABLE public.messages TO authenticated;
+
+
+--
+-- Name: COLUMN messages.text; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT INSERT(text) ON TABLE public.messages TO authenticated;
+
+
+--
+-- Name: SEQUENCE messages_id_seq; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT ALL ON SEQUENCE public.messages_id_seq TO anon;
+GRANT ALL ON SEQUENCE public.messages_id_seq TO authenticated;
+GRANT ALL ON SEQUENCE public.messages_id_seq TO service_role;
+
+
+--
+-- Name: TABLE profiles; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT ALL ON TABLE public.profiles TO service_role;
+GRANT SELECT ON TABLE public.profiles TO authenticated;
+
+
+--
+-- Name: COLUMN profiles.owner_name; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT UPDATE(owner_name) ON TABLE public.profiles TO authenticated;
+
+
+--
+-- Name: COLUMN profiles.nickname; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT UPDATE(nickname) ON TABLE public.profiles TO authenticated;
+
+
+--
+-- Name: COLUMN profiles.role; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT UPDATE(role) ON TABLE public.profiles TO authenticated;
+
+
+--
+-- Name: COLUMN profiles.start_weight; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT UPDATE(start_weight) ON TABLE public.profiles TO authenticated;
+
+
+--
+-- Name: COLUMN profiles.target_weight; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT UPDATE(target_weight) ON TABLE public.profiles TO authenticated;
+
+
+--
+-- Name: SEQUENCE profiles_id_seq; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT ALL ON SEQUENCE public.profiles_id_seq TO anon;
+GRANT ALL ON SEQUENCE public.profiles_id_seq TO authenticated;
+GRANT ALL ON SEQUENCE public.profiles_id_seq TO service_role;
+
+
+--
+-- Name: TABLE records; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT ALL ON TABLE public.records TO service_role;
+GRANT SELECT ON TABLE public.records TO authenticated;
+
+
+--
+-- Name: COLUMN records.owner_id; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT INSERT(owner_id) ON TABLE public.records TO authenticated;
+
+
+--
+-- Name: COLUMN records.owner_name; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT INSERT(owner_name),UPDATE(owner_name) ON TABLE public.records TO authenticated;
+
+
+--
+-- Name: COLUMN records.space_id; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT INSERT(space_id) ON TABLE public.records TO authenticated;
+
+
+--
+-- Name: COLUMN records.record_date; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT INSERT(record_date) ON TABLE public.records TO authenticated;
+
+
+--
+-- Name: COLUMN records.weight; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT INSERT(weight),UPDATE(weight) ON TABLE public.records TO authenticated;
+
+
+--
+-- Name: COLUMN records.tags; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT INSERT(tags),UPDATE(tags) ON TABLE public.records TO authenticated;
+
+
+--
+-- Name: COLUMN records.todo_done; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT INSERT(todo_done),UPDATE(todo_done) ON TABLE public.records TO authenticated;
+
+
+--
+-- Name: COLUMN records.mood; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT INSERT(mood),UPDATE(mood) ON TABLE public.records TO authenticated;
+
+
+--
+-- Name: COLUMN records.note; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT INSERT(note),UPDATE(note) ON TABLE public.records TO authenticated;
+
+
+--
+-- Name: SEQUENCE records_id_seq; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT ALL ON SEQUENCE public.records_id_seq TO anon;
+GRANT ALL ON SEQUENCE public.records_id_seq TO authenticated;
+GRANT ALL ON SEQUENCE public.records_id_seq TO service_role;
+
+
+--
+-- Name: TABLE rewards; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT ALL ON TABLE public.rewards TO service_role;
+GRANT SELECT ON TABLE public.rewards TO authenticated;
+
+
+--
+-- Name: SEQUENCE rewards_id_seq; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT ALL ON SEQUENCE public.rewards_id_seq TO anon;
+GRANT ALL ON SEQUENCE public.rewards_id_seq TO authenticated;
+GRANT ALL ON SEQUENCE public.rewards_id_seq TO service_role;
+
+
+--
+-- Name: TABLE space_members; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT ALL ON TABLE public.space_members TO service_role;
+
+
+--
+-- Name: SEQUENCE space_members_id_seq; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT ALL ON SEQUENCE public.space_members_id_seq TO anon;
+GRANT ALL ON SEQUENCE public.space_members_id_seq TO authenticated;
+GRANT ALL ON SEQUENCE public.space_members_id_seq TO service_role;
+
+
+--
+-- Name: TABLE spaces; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT ALL ON TABLE public.spaces TO service_role;
+
+
+--
+-- Name: TABLE tags; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT ALL ON TABLE public.tags TO service_role;
+GRANT SELECT,DELETE ON TABLE public.tags TO authenticated;
+
+
+--
+-- Name: COLUMN tags.owner_id; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT INSERT(owner_id) ON TABLE public.tags TO authenticated;
+
+
+--
+-- Name: COLUMN tags.owner_name; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT INSERT(owner_name) ON TABLE public.tags TO authenticated;
+
+
+--
+-- Name: COLUMN tags.space_id; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT INSERT(space_id) ON TABLE public.tags TO authenticated;
+
+
+--
+-- Name: COLUMN tags.text; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT INSERT(text) ON TABLE public.tags TO authenticated;
+
+
+--
+-- Name: COLUMN tags.sort; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT INSERT(sort) ON TABLE public.tags TO authenticated;
+
+
+--
+-- Name: SEQUENCE tags_id_seq; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT ALL ON SEQUENCE public.tags_id_seq TO anon;
+GRANT ALL ON SEQUENCE public.tags_id_seq TO authenticated;
+GRANT ALL ON SEQUENCE public.tags_id_seq TO service_role;
+
+
+--
+-- Name: TABLE todos; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT ALL ON TABLE public.todos TO service_role;
+GRANT SELECT,DELETE ON TABLE public.todos TO authenticated;
+
+
+--
+-- Name: COLUMN todos.owner_id; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT INSERT(owner_id) ON TABLE public.todos TO authenticated;
+
+
+--
+-- Name: COLUMN todos.owner_name; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT INSERT(owner_name) ON TABLE public.todos TO authenticated;
+
+
+--
+-- Name: COLUMN todos.space_id; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT INSERT(space_id) ON TABLE public.todos TO authenticated;
+
+
+--
+-- Name: COLUMN todos.text; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT INSERT(text) ON TABLE public.todos TO authenticated;
+
+
+--
+-- Name: COLUMN todos.sort; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT INSERT(sort) ON TABLE public.todos TO authenticated;
+
+
+--
+-- Name: SEQUENCE todos_id_seq; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT ALL ON SEQUENCE public.todos_id_seq TO anon;
+GRANT ALL ON SEQUENCE public.todos_id_seq TO authenticated;
+GRANT ALL ON SEQUENCE public.todos_id_seq TO service_role;
+
+
+--
+-- Name: DEFAULT PRIVILEGES FOR SEQUENCES; Type: DEFAULT ACL; Schema: public; Owner: postgres
+--
+
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON SEQUENCES TO postgres;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON SEQUENCES TO anon;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticated;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON SEQUENCES TO service_role;
+
+
+
+
+--
+-- Name: DEFAULT PRIVILEGES FOR FUNCTIONS; Type: DEFAULT ACL; Schema: public; Owner: postgres
+--
+
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON FUNCTIONS TO postgres;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON FUNCTIONS TO anon;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON FUNCTIONS TO authenticated;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON FUNCTIONS TO service_role;
+
+
+
+
+--
+-- Name: DEFAULT PRIVILEGES FOR TABLES; Type: DEFAULT ACL; Schema: public; Owner: postgres
+--
+
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON TABLES TO postgres;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON TABLES TO anon;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON TABLES TO authenticated;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON TABLES TO service_role;
+
+
+
+
+--
+-- PostgreSQL database dump complete
+--
+
+\unrestrict cwmcfV7IiFwzfvO5FmJaUBmVzKAgp38ln3VeiYZM6Vt6TyvFMHaLucWi88iPSFy
+
