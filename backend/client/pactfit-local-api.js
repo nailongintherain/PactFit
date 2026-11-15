@@ -147,6 +147,7 @@
 
     function http(method, path, body, headers) {
       var h = { 'Content-Type': 'application/json' };
+      if (cfg.publicKey) h.apikey = cfg.publicKey;
       if (headers) { Object.keys(headers).forEach(function (k) { h[k] = headers[k]; }); }
       return fetchImpl(base() + path, {
         method: method,
@@ -176,6 +177,22 @@
     }
 
     return {
+      // Validate implicit email callbacks against this project's Auth before accepting the session.
+      consumeCallback: function (hash) {
+        if (!cfg.publicKey) return Promise.resolve(false);
+        var params = new URLSearchParams(String(hash || '').replace(/^#/, ''));
+        if (params.has('error')) return Promise.reject(err('auth_callback_failed', '登录链接无效或已过期，请重新发送'));
+        var myGen = sessionGen;
+        var access = params.get('access_token');
+        if (!access) return Promise.resolve(false);
+        return http('GET', '/user', undefined, { Authorization: 'Bearer ' + access }).then(function (r) {
+          if (!r.ok || !r.data || !r.data.id) throw err('auth_callback_failed', '登录链接验证失败');
+          if (myGen !== sessionGen) throw err('session_stale', '登录状态已变更');
+          setSession({ access_token: access, refresh_token: params.get('refresh_token'), user: r.data });
+          return true;
+        });
+      },
+
       /* 手机号登录：自托管 GoTrue 未配置 SMS provider，明确不支持（不伪装成功） */
       requestPhoneOtp: function () {
         return Promise.reject(err('unsupported',
@@ -188,7 +205,7 @@
         if (!email || typeof email !== 'string' || email.indexOf('@') < 1) {
           return Promise.reject(err('bad_request', '邮箱格式不正确'));
         }
-        return http('POST', '/otp', { email: email, create_user: true })
+        return http('POST', '/otp' + (cfg.redirectUrl ? '?redirect_to=' + encodeURIComponent(cfg.redirectUrl) : ''), { email: email, create_user: true })
           .then(function (r) {
             if (r.status !== 200) {
               var msg = r.data && r.data.msg ? r.data.msg : ('OTP 请求失败 HTTP ' + r.status);
@@ -280,7 +297,7 @@
         refreshInFlightGen = myGen;
         var p = f(base() + '/token?grant_type=refresh_token', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: Object.assign({ 'Content-Type': 'application/json' }, cfg.publicKey ? { apikey: cfg.publicKey } : {}),
           body: JSON.stringify({ refresh_token: session.refresh_token })
         }).then(function (res) {
           return res.text().then(function (text) {
@@ -339,6 +356,7 @@
       signOut: function () {
         ensureLocal();
         if (!session) {
+          sessionGen++; // also invalidate callbacks before the first session
           return Promise.resolve({
             data: { signedOut: false, localCleared: true, serverRevoked: false, reason: 'no_session' },
             error: null
@@ -393,6 +411,7 @@
       var t;
       try { t = token(); } catch (e) { return Promise.reject(e); } /* 未登录：统一走 Promise 拒绝 */
       var h = { 'Content-Type': 'application/json' };
+      if (cfg.publicKey) h.apikey = cfg.publicKey;
       h['Authorization'] = 'Bearer ' + t;
       if (preferRepresentation) h['Prefer'] = 'return=representation';
       return fetchImpl(base() + path, {
@@ -606,8 +625,8 @@
     if (!f) throw err('no_fetch', '运行环境缺少 fetch（需要浏览器或 Node 18+）');
 
     var mode = config && typeof config.mode === 'string' ? config.mode : 'cloud';
-    if (mode !== 'cloud' && mode !== 'local') {
-      throw err('config_invalid', 'mode 仅允许 cloud | local');
+    if (mode !== 'cloud' && mode !== 'local' && mode !== 'staging') {
+      throw err('config_invalid', 'mode 仅允许 cloud | local | staging');
     }
 
     if (mode === 'cloud') {
@@ -616,15 +635,36 @@
     }
 
     /* local 模式：必须显式提供两个地址，缺失即报错（绝不静默回退云端） */
-    if (!config.authUrl || !config.restUrl) {
+    if (mode === 'local' && (!config.authUrl || !config.restUrl)) {
       throw err('config_missing',
         'local 模式需要显式 authUrl（GoTrue）与 restUrl（PostgREST）——缺失时禁止回退到云端');
     }
-    var cfg = {
-      mode: 'local',
-      authUrl: assertLoopback(config.authUrl, 'authUrl'),
-      restUrl: assertLoopback(config.restUrl, 'restUrl')
-    };
+    var cfg;
+    if (mode === 'staging') {
+      var u;
+      try { u = new URL(config.supabaseUrl); } catch (e) { throw err('config_invalid', 'Supabase URL 无效'); }
+      if (u.protocol !== 'https:' || !/^[a-z0-9]{20}\.supabase\.co$/.test(u.hostname) ||
+          u.username || u.password || u.search || u.hash || u.port || !/^\/(?:rest\/v1\/?)?$/.test(u.pathname)) {
+        throw err('config_invalid', 'staging 必须使用精确的 Supabase HTTPS 项目地址');
+      }
+      var key = config.publicKey || '';
+      var publicKey = /^sb_publishable_[A-Za-z0-9_-]+$/.test(key);
+      if (!publicKey) {
+        try {
+          var payload = JSON.parse(atob(key.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+          publicKey = payload.role === 'anon';
+        } catch (e) {}
+      }
+      if (!publicKey) throw err('config_invalid', '只接受 publishable / anon 公开客户端密钥');
+      var redirect;
+      try { redirect = new URL(config.redirectUrl); } catch (e) { throw err('config_invalid', '认证回调地址缺失'); }
+      if (redirect.protocol !== 'https:' || redirect.username || redirect.password || redirect.search || redirect.hash || redirect.pathname !== '/') {
+        throw err('config_invalid', '认证回调必须是 HTTPS 站点根地址');
+      }
+      cfg = { mode: 'local', authUrl: u.origin + '/auth/v1', restUrl: u.origin + '/rest/v1', publicKey: key, redirectUrl: redirect.href };
+    } else {
+      cfg = { mode: 'local', authUrl: assertLoopback(config.authUrl, 'authUrl'), restUrl: assertLoopback(config.restUrl, 'restUrl') };
+    }
 
     var auth = createAuth(f, cfg);
     var db = createDb(f, cfg, auth);

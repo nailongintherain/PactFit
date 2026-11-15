@@ -1,0 +1,27 @@
+name: Staging checks
+on:
+  push:
+    branches: [feat/local-backend-adapter-h1]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  staging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - run: node backend/tests/pactfit-be.test.js
+      - run: node backend/client/pactfit-local-api.test.js
+      - run: node backend/tests/pactfit-sw.test.js
+      - run: node backend/tests/staging.test.js
+      - name: Verify generated migration
+        run: |
+          python scripts/prepare-staging-migration.py
+          git diff --exit-code -- staging/migrations/001-business.sql
+      - run: ./scripts/check-staging-db.sh

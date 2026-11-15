@@ -579,8 +579,15 @@ main.page{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom
      规则：仅回环主机（127.0.0.1 / localhost / ::1）+ 显式开发开关（?local=1 或
      localStorage['pactfit_local_dev']='1'）才得到 local；公网/其他来源恒为 cloud；
      hash 不参与判定。模式在启动时一次确定，之后不再变更。 -->
+<script src="./deployment-config.js"></script>
 <script data-page-node-id="pfBackendMode">
 (function(){
+  if (window.PACTFIT_DEPLOYMENT && window.PACTFIT_DEPLOYMENT.mode === 'staging') {
+    window.__PACTFIT_BACKEND__ = 'local'; // reuse independent business flow
+    window.__PACTFIT_LOCAL_CFG__ = window.PACTFIT_DEPLOYMENT;
+    return;
+  }
+  /* STAGING_BUILD_GUARD */
   var host = (location.hostname || '').toLowerCase();
   var loopback = (host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '[::1]');
   var flag = false;
@@ -630,6 +637,7 @@ var HER = 'her', HIM = 'him';
 var ROLES = { her:'我', him:'他' };
 
 /* 后端模式（启动时已由页面头部脚本确定，之后不可变） */
+var STAGING = !!(window.PACTFIT_DEPLOYMENT && window.PACTFIT_DEPLOYMENT.mode === 'staging');
 var BACKEND = (window.__PACTFIT_BACKEND__ === 'local') ? 'local' : 'cloud';
 var cloud = null;      /* cloud 模式：WorkBuddy Cloud SDK 实例；local 模式下为拒绝桩 */
 var localApi = null;   /* local 模式：PactFitLocalApi 适配层实例 */
@@ -706,7 +714,7 @@ function show(id){
 }
 function tickClock(){
   var d=new Date();
-  $('sb-time').textContent = (BACKEND === 'local' ? 'LOCAL ' : '') + d.getHours()+':'+pad(d.getMinutes());
+  $('sb-time').textContent = (STAGING ? 'STAGING ' : (BACKEND === 'local' ? 'LOCAL ' : '')) + d.getHours()+':'+pad(d.getMinutes());
 }
 setInterval(tickClock, 20000);
 
@@ -716,7 +724,7 @@ setInterval(tickClock, 20000);
 function initCloud(){
   if (BACKEND === 'local') {
     var cfg = window.__PACTFIT_LOCAL_CFG__ || { authUrl: 'http://127.0.0.1:9999', restUrl: 'http://127.0.0.1:3000' };
-    localApi = PactFitLocalApi.createLocalBackend({ mode: 'local', authUrl: cfg.authUrl, restUrl: cfg.restUrl });
+    localApi = PactFitLocalApi.createLocalBackend(cfg.mode === 'staging' ? cfg : { mode: 'local', authUrl: cfg.authUrl, restUrl: cfg.restUrl });
     LB = PactFitBE.createLocalBridge({ api: localApi });
     cloud = PactFitBE.createBlockedCloud();
     return;
@@ -740,6 +748,7 @@ function applyLocalModeUi(){
       d.id = 'local-banner';
       d.style.cssText = 'margin:0 0 12px;padding:8px 12px;border-radius:8px;background:#FFF6E5;border:1px solid #F0D9A8;color:#7A5A12;font-size:12px;line-height:1.6';
       d.textContent = '本地开发模式（GoTrue :9999 / PostgREST :3000）：仅邮箱链接登录、创建/加入空间、体重记录可用；手机号登录、小目标、标签、奖励、留言暂不支持。';
+      if (STAGING) d.textContent = '预生产环境：邮箱链接登录、创建/加入空间、体重记录可用；其他功能暂未接入。点击邮件链接即可返回登录。';
       box.insertBefore(d, box.firstChild);
     }
     var tk = $('token');
@@ -1929,7 +1938,7 @@ async function sendCode(){
       try {
         await LB.requestEmailOtp(email);
         pendingOtp = { kind:'email', value:email, localLink:true };
-        $('login-err').textContent = '登录链接已发送（本地环境在 Mailpit :8025 查看），请把邮件里的整条链接粘贴到下方输入框';
+        $('login-err').textContent = STAGING ? '登录链接已发送，请在邮箱中点击链接返回本页面。' : '登录链接已发送（本地环境在 Mailpit :8025 查看），请把邮件里的整条链接粘贴到下方输入框';
         countdown(b2, 60);
       } catch(e) {
         b2.disabled = false; b2.textContent = '获取验证码';
@@ -2371,6 +2380,11 @@ $('btn-pair-logout').onclick = doLogout;   /* H-3-PAIR：view-pair 的退出登�
   try {
     initCloud();
     if (BACKEND === 'local') {
+      if (STAGING) {
+        var callbackHash = location.hash;
+        history.replaceState(null, '', location.pathname);
+        await localApi.auth.consumeCallback(callbackHash);
+      }
       var ls = await LB.getSession();
       if (ls && ls.userId) { await afterLogin(); }
       else { show('view-login'); }

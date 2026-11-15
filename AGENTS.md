@@ -60,3 +60,11 @@ compose.yaml         PostgreSQL 17 / GoTrue v2.197.0 / PostgREST v16.5 / Mailpit
 - `web/index.html` 的模式判定要求 loopback 主机；把前端部署到公网域名时 local 模式不会激活
   （需要后续小改动放宽判定，当前刻意保守）。
 - todos/tags 增删后，历史 `records.todo_done` / `records.tags` 中的旧引用不级联清理（与原版行为一致）。
+
+## 独立预生产 staging
+
+- 操作入口 `staging/README.md`；`node scripts/build-staging.js` 从 web/index.html 生成 dist/index.html。
+- PACTFIT_STAGING_* 不复用 Docker .env；PUBLIC_CONFIG 保持不变。
+- staging 复用独立页面分支（内部 BACKEND=local），适配层显式接收 mode=staging，固定派生同一 Supabase 项目的 auth/v1、rest/v1；所有请求带公开 apikey，Authorization 仅传用户 JWT。
+- `staging/migrations/001-business.sql` 由生成脚本产生，仅用于空托管项目，不运行本地角色初始化。
+- 新增检查：node backend/tests/staging.test.js、scripts/check-staging-db.sh、python scripts/check-staging-remote.py（只读指定 staging）。
