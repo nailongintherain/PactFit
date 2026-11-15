@@ -16,7 +16,8 @@
       auth_callback_failed: '邮件链接已使用或过期。请使用邮箱和密码登录；尚未设置密码请选择“设置／找回密码”。',
       unauthenticated: '设置密码的会话已失效，请重新打开有效的密码重置链接。',
       auth_response_invalid: '服务器没有确认本次认证操作，请稍后重试。',
-      session_stale: '登录状态已变更，请重新登录。'
+      session_stale: '登录状态已变更，请重新登录。',
+      data_load_failed: '登录成功，但暂时无法读取空间和记录。请稍后重新登录；本次读取失败不会删除已保存数据。'
     };
     return texts[e && e.code] || '请求未完成，请检查网络后重试。';
   }

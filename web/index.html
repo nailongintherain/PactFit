@@ -93,6 +93,15 @@ body{
 }
 button,input,textarea,select{font-family:inherit;color:inherit;}
 button{border:none;background:none;cursor:pointer;}
+.saved-record-card{border-color:#D6E7DD;}
+.saved-record-badge{display:inline-block;padding:4px 8px;border-radius:7px;background:var(--good-soft);color:var(--good-ink);font-size:12px;font-weight:600;}
+.saved-record-value{font-size:28px;font-weight:700;margin:10px 0 5px;font-variant-numeric:tabular-nums;}
+.saved-record-meta{font-size:12px;color:var(--ink2);line-height:1.7;}
+.saved-record-note{font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere;margin:7px 0 0;line-height:1.6;}
+.saved-record-row{padding:13px 0;border-bottom:1px solid var(--line);}
+.saved-record-row:last-child{border-bottom:0;padding-bottom:0;}
+.record-editor-status{font-size:12px;margin-bottom:10px;color:var(--ink2);}
+.record-editor-status.dirty{color:var(--her);font-weight:600;}
 .hidden{display:none !important;}
 .center{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 28px;text-align:center;}
 
@@ -981,6 +990,60 @@ function together(){
 }
 
 /* ---------- 渲染：首页 ---------- */
+function savedRecordsSummary(){
+  return PactFitBE.summarizeSavedRecords(S.records, uid, S.space, todayStr());
+}
+function savedRecordDetail(row){
+  return '<div class="saved-record-meta">'+esc(String(row.record_date).slice(0,10))+'</div>'
+    + '<div class="saved-record-value">'+n1(row.weight)+' <span style="font-size:14px">kg</span></div>'
+    + (row.mood ? '<div class="saved-record-meta">心情：'+esc(row.mood)+'</div>' : '')
+    + (row.note ? '<p class="saved-record-note">备注：'+esc(row.note)+'</p>' : '');
+}
+function savedRecordsCard(action){
+  var saved = savedRecordsSummary(), row = saved.today || saved.latest;
+  var html = '<section class="card saved-record-card" aria-label="已保存的体重记录">'
+    + '<div class="sec-head"><div class="sec-title">已保存的记录</div>';
+  if (action && saved.count) html += '<button class="sec-edit" id="btn-view-saved-records">查看历史</button>';
+  html += '</div>';
+  if (row) {
+    html += '<span class="saved-record-badge">'+(saved.today ? '今日打卡已保存' : '最近一次打卡')+'</span>'
+      + savedRecordDetail(row)
+      + '<p class="saved-record-meta">当前空间 · 已保存 '+saved.count+' 条打卡 · '+saved.days+' 个记录日</p>';
+  } else {
+    html += '<div class="empty">还没有体重打卡。<br>资料里的起始体重不计为打卡，填写后点击保存才会记录。</div>';
+  }
+  return html + '</section>';
+}
+function savedRecordsHistory(){
+  var saved = savedRecordsSummary();
+  var html = '<section class="card saved-record-card" id="saved-record-history" aria-label="我的打卡历史">'
+    + '<div class="sec-head"><div class="sec-title">我的打卡历史</div><span class="saved-record-badge">'+saved.count+' 条已保存</span></div>';
+  if (!saved.count) return html + '<div class="empty">尚未保存打卡，去「记录」填写今天的体重。</div></section>';
+  saved.rows.forEach(function(row, index){
+    if (index === 10) html += '<details><summary class="saved-record-meta">查看其余 '+(saved.count-10)+' 条记录</summary>';
+    html += '<article class="saved-record-row">'+savedRecordDetail(row)+'</article>';
+  });
+  if (saved.count > 10) html += '</details>';
+  return html + '</section>';
+}
+function recordDraftChanged(saved){
+  if (!saved) return true;
+  return Number(S.draft.weight) !== Number(saved.weight)
+    || (S.draft.note || '') !== (saved.note || '')
+    || (S.draft.mood || null) !== (saved.mood || null)
+    || JSON.stringify(S.draft.tags || []) !== JSON.stringify(saved.tags || [])
+    || JSON.stringify(S.draft.todoDone || []) !== JSON.stringify(saved.todo_done || []);
+}
+function updateRecordEditorState(){
+  if (!STAGING) return;
+  var el = $('record-editor-state');
+  if (!el) return;
+  var saved = recOn(uid, todayStr()), dirty = recordDraftChanged(saved);
+  el.textContent = !saved ? '填写区 · 今天的打卡尚未保存'
+    : (dirty ? '编辑区 · 修改尚未保存，已保存内容保持不变' : '编辑区 · 当前内容与已保存记录一致');
+  el.classList.toggle('dirty', dirty);
+}
+
 function renderHome(){
   var now = new Date();
   $('home-date').textContent = (now.getMonth()+1)+'月'+now.getDate()+'日 '+weekCN(now);
@@ -990,7 +1053,7 @@ function renderHome(){
 
   var t = together(), list = t.list;
   var me = statsOf(S.profile);
-  var html = '';
+  var html = STAGING ? savedRecordsCard(true) : '';
 
   html += '<div class="card hero">';
   html += '  <div class="hero-top">';
@@ -1061,6 +1124,12 @@ function renderHome(){
   if (gt) gt.onclick = openSettings;
   if (gt2) gt2.onclick = openSettings;
   $('btn-go-record').onclick = function(){ switchTab('record'); };
+  var savedLink = $('btn-view-saved-records');
+  if (savedLink) savedLink.onclick = function(){
+    switchTab('trend');
+    var history = $('saved-record-history');
+    if (history) history.scrollIntoView({ block:'start', behavior:'smooth' });
+  };
   Array.prototype.forEach.call(document.querySelectorAll('[data-todo]'), function(el){
     el.onclick = function(){ toggleTodo(+el.getAttribute('data-todo')); };
   });
@@ -1075,11 +1144,14 @@ function renderRecord(){
   var today = recOn(uid, todayStr());
   var weight = S.draft.weight != null ? S.draft.weight
              : (today ? Number(today.weight) : (mine && mine.latest != null ? mine.latest : (mine? mine.start : '')));
-  if (S.draft.weight == null) S.draft.weight = weight;
-  S.draft.tags = today ? (today.tags||[]).slice() : (S.draft.tags||[]);
-  S.draft.todoDone = today ? (today.todo_done||[]).slice() : (S.draft.todoDone||[]);
-  S.draft.mood = today ? (today.mood||null) : S.draft.mood;
-  S.draft.note = today ? (today.note||'') : (S.draft.note||'');
+  var initializeDraft = S.draft.weight == null;
+  if (initializeDraft) S.draft.weight = weight;
+  if (!STAGING || initializeDraft) {
+    S.draft.tags = today ? (today.tags||[]).slice() : (S.draft.tags||[]);
+    S.draft.todoDone = today ? (today.todo_done||[]).slice() : (S.draft.todoDone||[]);
+    S.draft.mood = today ? (today.mood||null) : S.draft.mood;
+    S.draft.note = today ? (today.note||'') : (S.draft.note||'');
+  }
 
   var prev = null;
   if (mine && mine.records.length) {
@@ -1096,7 +1168,9 @@ function renderRecord(){
   var MOODS = ['很开心','还不错','有点难','想放弃'];
   var html = '';
 
+  if (STAGING) html += savedRecordsCard(false);
   html += '<div class="card weigh">';
+  if (STAGING) html += '<div class="record-editor-status" id="record-editor-state" role="status" aria-live="polite"></div>';
   html += '  <div class="weigh-label">今天早上的空腹体重</div>';
   html += '  <div class="weigh-num"><input id="rec-weight" type="number" inputmode="decimal" step="0.1" value="'+esc(weight)+'"><span>kg</span></div>';
   html += '  <div class="weigh-delta">'+esc(deltaHtml)+'</div>';
@@ -1141,12 +1215,13 @@ function renderRecord(){
 
   var ctaLabel = S.others.length === 1 ? ('保存并同步给 '+esc(S.others[0].nickname))
                : (S.others.length > 1 ? ('保存，组里 '+(S.others.length+1)+' 人都看得到') : '保存今天的记录');
+  if (STAGING) ctaLabel = today ? '保存修改' : '保存今日打卡';
   html += '<button class="cta" id="btn-save-rec">'+ctaLabel+'</button>';
 
   $('record-body').innerHTML = html;
 
-  $('rec-weight').oninput = function(){ S.draft.weight = this.value; updateDelta(); };
-  $('rec-note').oninput = function(){ S.draft.note = this.value; };
+  $('rec-weight').oninput = function(){ S.draft.weight = this.value; updateDelta(); updateRecordEditorState(); };
+  $('rec-note').oninput = function(){ S.draft.note = this.value; updateRecordEditorState(); };
   $('go-settings-tag').onclick = openSettings;
   $('rec-tag-add').onclick = addCustomTag;
 
@@ -1172,6 +1247,7 @@ function renderRecord(){
     };
   });
   $('btn-save-rec').onclick = saveRecord;
+  updateRecordEditorState();
 }
 function updateDelta(){
   var mine = statsOf(S.profile); if (!mine) return;
@@ -1190,7 +1266,10 @@ function renderTrend(){
   var t = together(), list = t.list;
   var days = 0;
   list.forEach(function(s){ if (s.days) days = Math.max(days, daysBetween(s.days, todayStr())); });
-  $('trend-sub').textContent = days>0 ? ('一起坚持了 '+days+' 天') : '还没有数据';
+  if (STAGING && list.some(function(item){ return item.records.length > 0; })) days += 1;
+  $('trend-sub').textContent = STAGING
+    ? (savedRecordsSummary().count ? '我的 '+savedRecordsSummary().count+' 条已保存打卡' : '你还没有体重打卡')
+    : (days>0 ? ('一起坚持了 '+days+' 天') : '还没有数据');
   $('trend-avatars').innerHTML = S.profiles.map(function(p){
     return '<span class="av '+roleOf(p)+'">'+esc(p.nickname.slice(0,1))+'</span>';
   }).join('');
@@ -1230,6 +1309,7 @@ function renderTrend(){
   }
   html += '</div>';
 
+  if (STAGING) html = savedRecordsHistory() + html;
   $('trend-body').innerHTML = html;
 }
 
@@ -1245,12 +1325,12 @@ function renderChart(list){
   series.forEach(function(a){ all = all.concat(a); });
   var W=320, H=150, L=30, R=312, T=12, B=132;
   if (all.length < 2) {
-    return '<div class="empty" style="padding:34px 0">记录两天以上，这里就会画出曲线</div>';
+    return '<div class="empty" style="padding:34px 0">'+(STAGING ? '曲线需要至少两个日期的记录，已保存内容见上方历史。' : '记录两天以上，这里就会画出曲线')+'</div>';
   }
   var dates = {};
   all.forEach(function(p){ dates[p.date]=1; });
   var ds = Object.keys(dates).sort();
-  if (ds.length < 2) return '<div class="empty" style="padding:34px 0">记录两天以上，这里就会画出曲线</div>';
+  if (ds.length < 2) return '<div class="empty" style="padding:34px 0">'+(STAGING ? '曲线需要至少两个日期的记录，已保存内容见上方历史。' : '记录两天以上，这里就会画出曲线')+'</div>';
   var vmin = Math.min.apply(null, all.map(function(p){return p.remain;}));
   var vmax = Math.max.apply(null, all.map(function(p){return p.remain;}));
   var lo = Math.floor(vmin-0.6), hi = Math.ceil(vmax+0.6);
@@ -2087,9 +2167,11 @@ async function afterLogin(){
     await autoCheckRewards();
     if (!guard.isCurrent(ep)) return;
     show('app'); renderAll();
+    if (STAGING) switchTab('home');
   } catch(e){
     if (!guard.isCurrent(ep)) return;
     show('view-login');
+    if (STAGING && stagingAuthView) { stagingAuthView.showError({ code:'data_load_failed' }); return; }
     $('login-err').textContent = '读取数据失败：' + (e && e.message || '请重试');
   }
 }

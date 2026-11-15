@@ -42,6 +42,7 @@ node backend/client/pactfit-local-api.test.js
 node backend/tests/pactfit-sw.test.js
 node backend/tests/staging.test.js
 node backend/tests/staging-password.test.js
+node backend/tests/staging-records.test.js
 ./scripts/check-staging-db.sh
 python scripts/check-staging-remote.py
 ```
@@ -57,3 +58,7 @@ CI `.github/workflows/staging-checks.yml` 运行本地测试、生成迁移一�
 本代码由会话记录恢复为新提交，原 `6a201af` 不在远程。只有 GitHub 远程提交确认后才算代码交付成功；数据库迁移和 Pages 发布仍需按上述控制台步骤完成，构建通过不代表已上线。
 
 Pages 检测到含 pages_build_output_dir 的 wrangler.toml 后，以该文件管理支持的配置项。公开 URL/key/回调统一维护在 [vars]；修改最终域名时须更新此文件、staging/env.example 及 Supabase allowlist。Preview 显式为空，未配置独立回调前构建应拒绝。控制台填写正确不代表旧构建已收到变量，构建日志中的变量诊断是实际证据。
+
+## 已保存内容与编辑区
+
+staging 首页优先展示从账号、当前空间加载的已保存打卡（日期、体重、心情、备注、条数）；趋势页独立展示我的打卡历史。首次打卡当天也显示已有数据。记录页上方是只读已保存内容，下方是填写／编辑区；输入或选择心情只修改草稿，点击保存成功并重新读取后才更新已保存展示。重新登录回到首页，并从服务器重载记录；起始体重不计为打卡，草稿不持久化。引导填写信息流程未改。

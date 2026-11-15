@@ -461,6 +461,22 @@
     return { kind: 'success', message: parts.join('；') };
   }
 
+  // Only persisted rows for this account and space contribute to saved-content UI.
+  function summarizeSavedRecords(records, ownerId, spaceId, today) {
+    var rows = (records || []).filter(function (r) {
+      return r.owner_id === ownerId && r.space_id === spaceId;
+    }).slice().sort(function (a, b) {
+      return String(b.record_date).localeCompare(String(a.record_date));
+    });
+    var days = {};
+    rows.forEach(function (r) { days[String(r.record_date).slice(0, 10)] = true; });
+    return {
+      rows: rows, count: rows.length, days: Object.keys(days).length,
+      latest: rows[0] || null,
+      today: rows.filter(function (r) { return String(r.record_date).slice(0, 10) === today; })[0] || null
+    };
+  }
+
   /* local 模式替代 Cloud SDK 的拒绝桩：
      任何未适配调用都明确失败（unsupported_in_local_mode），
      绝不静默成功、绝不产生网络请求、绝无回退云端路径。 */
@@ -486,6 +502,7 @@
   }
 
   return {
+    summarizeSavedRecords: summarizeSavedRecords,
     resolveBackendMode: resolveBackendMode,
     parseEmailLink: parseEmailLink,
     extractTokenHash: extractTokenHash,

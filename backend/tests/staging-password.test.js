@@ -68,6 +68,7 @@ const response=(data,status=200)=>({ok:status>=200&&status<300,status,text:async
   assert.match(UI.errorText({code:'invalid_credentials'}),/设置／找回密码/);
   assert.match(UI.errorText({code:'auth_rate_limited'}),/限额/);
   assert.match(UI.errorText({code:'auth_callback_failed'}),/邮件链接已使用或过期/);
+  assert.match(UI.errorText({code:'data_load_failed'}),/暂时无法读取空间和记录/);
   assert.equal(UI.errorText({message:'synthetic secret'}).includes('synthetic secret'),false);
   assert.equal(fs.readFileSync(require('node:path').join(__dirname,'../../web/pactfit-local-api.js'),'utf8'),fs.readFileSync(require('node:path').join(__dirname,'../client/pactfit-local-api.js'),'utf8'));
   console.log('PASS password auth: signup, repeat login, recovery/update, confirmation, rate limits, stale sessions, credential handling');

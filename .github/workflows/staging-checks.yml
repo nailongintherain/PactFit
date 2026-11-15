@@ -21,6 +21,7 @@ jobs:
       - run: node backend/tests/pactfit-sw.test.js
       - run: node backend/tests/staging.test.js
       - run: node backend/tests/staging-password.test.js
+      - run: node backend/tests/staging-records.test.js
       - name: Verify generated migration
         run: |
           python scripts/prepare-staging-migration.py

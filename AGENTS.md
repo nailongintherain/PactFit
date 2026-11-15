@@ -70,3 +70,5 @@ compose.yaml         PostgreSQL 17 / GoTrue v2.197.0 / PostgREST v16.5 / Mailpit
 - 新增检查：node backend/tests/staging.test.js、scripts/check-staging-db.sh、python scripts/check-staging-remote.py（只读指定 staging）。
 
 - staging 认证使用独立邮箱＋密码页面 `web/pactfit-staging-auth.js`；Docker 保持链接登录。密码仅经本项目 HTTPS Auth 接口传输，不持久化或写日志。新增回归 `node backend/tests/staging-password.test.js`；无邮件注册须在 staging Supabase 关闭 Confirm email，旧无密码账号通过 recovery 设置密码。
+
+- staging 已保存记录与编辑区分开；`summarizeSavedRecords` 仅汇总当前账号和空间的服务端行，不把草稿或起始体重当打卡。新增回归 `node backend/tests/staging-records.test.js`。
