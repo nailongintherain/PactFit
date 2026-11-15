@@ -68,3 +68,5 @@ compose.yaml         PostgreSQL 17 / GoTrue v2.197.0 / PostgREST v16.5 / Mailpit
 - staging 复用独立页面分支（内部 BACKEND=local），适配层显式接收 mode=staging，固定派生同一 Supabase 项目的 auth/v1、rest/v1；所有请求带公开 apikey，Authorization 仅传用户 JWT。
 - `staging/migrations/001-business.sql` 由生成脚本产生，仅用于空托管项目，不运行本地角色初始化。
 - 新增检查：node backend/tests/staging.test.js、scripts/check-staging-db.sh、python scripts/check-staging-remote.py（只读指定 staging）。
+
+- staging 认证使用独立邮箱＋密码页面 `web/pactfit-staging-auth.js`；Docker 保持链接登录。密码仅经本项目 HTTPS Auth 接口传输，不持久化或写日志。新增回归 `node backend/tests/staging-password.test.js`；无邮件注册须在 staging Supabase 关闭 Confirm email，旧无密码账号通过 recovery 设置密码。

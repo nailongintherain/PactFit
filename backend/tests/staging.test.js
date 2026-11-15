@@ -81,7 +81,7 @@ const mock=async(url,init)=>{
       vm.runInNewContext(modeScript,context);
       vm.runInNewContext(loader,context);
       assert.equal(context.window.__PACTFIT_BACKEND__,'local');
-      assert.deepEqual(loaded,['./pactfit-local-api.js','./pactfit-be.js']);
+      assert.deepEqual(loaded,['./pactfit-local-api.js','./pactfit-staging-auth.js','./pactfit-be.js']);
       if(!deployment) assert.throws(()=>API.createLocalBackend(context.window.__PACTFIT_LOCAL_CFG__,mock));
     }
     for(const script of html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)) new vm.Script(script[1]);

@@ -10,9 +10,10 @@
 
 1. 确认项目为 pactfit-staging / us-east-1，在 SQL Editor 执行 `staging/migrations/001-business.sql`，再执行 `staging/verify.sql`。迁移在单个事务中提交，已有业务表时拒绝重新初始化，不修改托管 auth 或角色。
 2. Data API 启用 public schema，不暴露 private / migration。若已迁移但 API 仍报 PGRST205，检查 schema 设置，再执行 `NOTIFY pgrst, 'reload schema';`，不要重复 bootstrap。
-3. Authentication → Providers 启用 Email。内置邮件服务仅支持有限收件人且限额较低；测试账号邮箱应符合 Supabase 的团队成员限制。对外测试需在 Supabase 配置 SMTP，凭据只留服务端。
+3. Authentication → Sign In / Providers → Email：启用 Email。staging 使用邮箱＋密码；若要注册时无需确认邮件，将 **Confirm email 关闭并保存**。密码登录不会发送邮件。该设置仅适用于独立 staging。内置邮件服务有收件人和发信限额；设置／找回密码仍需邮件，限额用尽须等待额度恢复或在 Supabase 配置 SMTP，凭据只留服务端。
 4. Authentication → URL Configuration：Site URL 和 Redirect URLs 均填最终 Pages HTTPS 根地址，含 `/`。例如 `https://pactfit-staging.pages.dev/`，以 Cloudflare 实际分配地址为准。不要添加 WorkBuddy 域名。
-5. 保持默认邮件 ConfirmationURL 链接；用户点击后回到页面，应用向指定项目 `/auth/v1/user` 校验 token，再建立内存会话。刷新页面需重新登录。
+5. staging 页面提供独立“注册”“登录”“设置／找回密码”，不显示手机号或验证码。注册走 `/auth/v1/signup`，登录走 `/auth/v1/token?grant_type=password`。关闭 Confirm email 后新账号注册可直接建立会话；若仍返回需确认，页面提示确认要求，不伪造登录成功。会话仅内存，刷新后可再次用密码登录。
+6. 旧邮件链接账号没有密码：使用“设置／找回密码”接收一次密码恢复邮件，点击后在本站设置新密码。保留 Supabase 默认 Recovery 邮件的 ConfirmationURL 模板，恢复回调先向本项目 `/auth/v1/user` 校验，再调用带用户 JWT 的 PUT `/auth/v1/user` 更新密码。已有账号不能靠重新注册覆盖；关闭 Confirm email 不会给旧账号自动设置密码。旧 signup 邮件链接只能使用一次，不能用于二次登录。
 
 ## Cloudflare Pages 控制台
 
@@ -40,6 +41,7 @@ node backend/tests/pactfit-be.test.js
 node backend/client/pactfit-local-api.test.js
 node backend/tests/pactfit-sw.test.js
 node backend/tests/staging.test.js
+node backend/tests/staging-password.test.js
 ./scripts/check-staging-db.sh
 python scripts/check-staging-remote.py
 ```
@@ -48,7 +50,7 @@ CI `.github/workflows/staging-checks.yml` 运行本地测试、生成迁移一�
 
 迁移由 `python scripts/prepare-staging-migration.py` 从已验证的 `db/migrations/02-business.sql` 生成，去除 psql 元命令、所有权变更和宽泛默认授权，保留业务/内部十表、RLS、触发器、RPC、列级 GRANT。不要手改生成 SQL 或本地原始迁移。
 
-部署后用两个专用测试邮箱验收：邮箱登录 → A 创建空间 → B 加入 → A 记体重 → B 可读 → 登出。Network 中认证/业务请求应全部去新项目。小目标、标签、奖励、留言、资料编辑等原独立页面未接入能力继续明确提示不可用，不能宣称全功能上线。
+部署后用两个专用测试邮箱验收：邮箱＋密码注册 → 退出 → 同一账号密码登录两次 → A 创建空间 → B 加入 → A 记体重 → B 可读 → 登出。Network 中认证/业务请求应全部去新项目。小目标、标签、奖励、留言、资料编辑等原独立页面未接入能力继续明确提示不可用，不能宣称全功能上线。
 
 ## 同步及状态
 

@@ -176,12 +176,61 @@
       return session;
     }
 
+    function authFailure(r) {
+      var d = r.data || {};
+      var code = d.error_code || d.code || '';
+      if (r.status === 429 || /rate.?limit/i.test(String(code))) code = 'auth_rate_limited';
+      var known = {
+        invalid_credentials: '邮箱或密码不正确',
+        email_not_confirmed: '邮箱尚未确认',
+        user_already_exists: '该邮箱已注册，请登录或设置密码',
+        signup_disabled: '当前项目未开放注册',
+        weak_password: '密码强度不足',
+        same_password: '新密码不能与旧密码相同',
+        auth_rate_limited: '请求过于频繁，请稍后重试'
+      };
+      return err(known[code] ? code : 'auth_request_failed', known[code] || '认证请求失败，请稍后重试');
+    }
+
+    function requireStaging() {
+      if (!cfg.publicKey) throw err('mode_mismatch', '密码认证仅用于 staging');
+    }
+
+    function credentials(email, password, signup) {
+      if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+        throw err('bad_request', '请输入正确的邮箱地址');
+      }
+      if (typeof password !== 'string' || !password.length || password.length > 128 || (signup && password.length < 8)) {
+        throw err('bad_request', signup ? '密码须为 8–128 位' : '请输入密码（最多 128 位）');
+      }
+      return { email: email.trim(), password: password };
+    }
+
+    function passwordAuth(path, email, password, signup) {
+      requireStaging();
+      var body;
+      try { body = credentials(email, password, signup); } catch (e) { return Promise.reject(e); }
+      var myGen = ++sessionGen;
+      return http('POST', path, body).then(function (r) {
+        if (myGen !== sessionGen) throw err('session_stale', '登录状态已变更');
+        if (!r.ok) throw authFailure(r);
+        if (r.data && r.data.access_token) {
+          var established = setSession(r.data);
+          return { data: { session: established, confirmationRequired: false }, error: null };
+        }
+        if (signup && r.data && r.data.id) {
+          return { data: { session: null, confirmationRequired: true }, error: null };
+        }
+        throw err('auth_response_invalid', '认证响应缺少会话');
+      });
+    }
+
     return {
       // Validate implicit email callbacks against this project's Auth before accepting the session.
       consumeCallback: function (hash) {
         if (!cfg.publicKey) return Promise.resolve(false);
         var params = new URLSearchParams(String(hash || '').replace(/^#/, ''));
-        if (params.has('error')) return Promise.reject(err('auth_callback_failed', '登录链接无效或已过期，请重新发送'));
+        if (params.has('error')) return Promise.reject(err('auth_callback_failed', '邮件链接已使用或过期；请使用邮箱和密码登录。尚未设置密码可选择设置／找回密码。'));
         var myGen = sessionGen;
         var access = params.get('access_token');
         if (!access) return Promise.resolve(false);
@@ -189,7 +238,34 @@
           if (!r.ok || !r.data || !r.data.id) throw err('auth_callback_failed', '登录链接验证失败');
           if (myGen !== sessionGen) throw err('session_stale', '登录状态已变更');
           setSession({ access_token: access, refresh_token: params.get('refresh_token'), user: r.data });
-          return true;
+          return params.get('type') === 'recovery' ? 'recovery' : true;
+        });
+      },
+
+      signInWithPassword: function (email, password) {
+        return passwordAuth('/token?grant_type=password', email, password, false);
+      },
+      signUpWithPassword: function (email, password) {
+        return passwordAuth('/signup' + (cfg.redirectUrl ? '?redirect_to=' + encodeURIComponent(cfg.redirectUrl) : ''), email, password, true);
+      },
+      requestPasswordRecovery: function (email) {
+        requireStaging();
+        try { credentials(email, 'validation-only', false); } catch (e) { return Promise.reject(e); }
+        return http('POST', '/recover?redirect_to=' + encodeURIComponent(cfg.redirectUrl), { email: email.trim() }).then(function (r) {
+          if (!r.ok) throw authFailure(r);
+          return { data: { sent: true }, error: null };
+        });
+      },
+      updatePassword: function (password) {
+        requireStaging();
+        try { credentials('validation@example.invalid', password, true); } catch (e) { return Promise.reject(e); }
+        if (!session) return Promise.reject(err('unauthenticated', '请先打开设置密码邮件中的链接'));
+        var myGen = sessionGen;
+        return http('PUT', '/user', { password: password }, { Authorization: 'Bearer ' + session.access_token }).then(function (r) {
+          if (myGen !== sessionGen) throw err('session_stale', '登录状态已变更');
+          if (!r.ok) throw authFailure(r);
+          if (!r.data || !r.data.id) throw err('auth_response_invalid', '密码更新未得到确认');
+          return { data: { updated: true }, error: null };
         });
       },
 

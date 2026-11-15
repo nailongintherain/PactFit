@@ -408,6 +408,7 @@ main.page{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom
         <button data-page-node-id="MnHrDyYxh0apSa6J8mrcLJ" class="btn sm ghost" id="btn-install-later" type="button"><!--pnid:5er7lefwDffPp0wp3E5Luc-->以后再说</button>
       </div>
     </div>
+    <div id="staging-auth" class="hidden"></div>
     <div data-page-node-id="JKnGyIkf2qUmUTbMav4Kow" class="field" id="f-phone">
       <label data-page-node-id="3Vueizfs7movlNPuazH9uf"><!--pnid:dq46PnsEv9abccpdYAxTJu-->手机号</label>
       <div data-page-node-id="X2F9N214dXkCq32BbCkUr7" class="code-row">
@@ -613,6 +614,7 @@ main.page{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom
   }
   if (window.__PACTFIT_BACKEND__ === 'local') {
     load('./pactfit-local-api.js');
+    if (window.__PACTFIT_LOCAL_CFG__ && window.__PACTFIT_LOCAL_CFG__.mode === 'staging') load('./pactfit-staging-auth.js');
   } else {
     load('https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js');
   }
@@ -637,6 +639,7 @@ var HER = 'her', HIM = 'him';
 var ROLES = { her:'我', him:'他' };
 
 /* 后端模式（启动时已由页面头部脚本确定，之后不可变） */
+var stagingAuthView = null;
 var STAGING = !!(window.PACTFIT_DEPLOYMENT && window.PACTFIT_DEPLOYMENT.mode === 'staging');
 var BACKEND = (window.__PACTFIT_BACKEND__ === 'local') ? 'local' : 'cloud';
 var cloud = null;      /* cloud 模式：WorkBuddy Cloud SDK 实例；local 模式下为拒绝桩 */
@@ -748,7 +751,7 @@ function applyLocalModeUi(){
       d.id = 'local-banner';
       d.style.cssText = 'margin:0 0 12px;padding:8px 12px;border-radius:8px;background:#FFF6E5;border:1px solid #F0D9A8;color:#7A5A12;font-size:12px;line-height:1.6';
       d.textContent = '本地开发模式（GoTrue :9999 / PostgREST :3000）：仅邮箱链接登录、创建/加入空间、体重记录可用；手机号登录、小目标、标签、奖励、留言暂不支持。';
-      if (STAGING) d.textContent = '预生产环境：邮箱链接登录、创建/加入空间、体重记录可用；其他功能暂未接入。点击邮件链接即可返回登录。';
+      if (STAGING) d.textContent = '预生产环境：邮箱和密码注册／登录。手机号暂未接入；创建／加入空间及体重记录可用。';
       box.insertBefore(d, box.firstChild);
     }
     var tk = $('token');
@@ -758,6 +761,16 @@ function applyLocalModeUi(){
       tk.setAttribute('placeholder', '粘贴邮件里的完整登录链接（含 type=signup 或 type=magiclink）');
     }
   } catch(e){}
+}
+
+function applyStagingAuthUi(){
+  ['f-phone', 'f-email', 'btn-login', 'btn-switch-method', 'login-err'].forEach(function(id){ $(id).classList.add('hidden'); });
+  $('token').closest('.field').classList.add('hidden');
+  $('staging-auth').classList.remove('hidden');
+  stagingAuthView = PactFitStagingAuth.mount({
+    root: $('staging-auth'), auth: localApi.auth,
+    onLogin: async function(){ guard.bump(); await afterLogin(); }
+  });
 }
 
 /* ---------- 数据访问 ---------- */
@@ -1886,6 +1899,7 @@ async function saveReward(){
 
 /* ---------- 登录 ---------- */
 function setLoginMode(mode){
+  if (STAGING) mode = 'email';
   loginMode = mode;
   if (mode === 'phone') {
     $('f-phone').classList.remove('hidden'); $('f-email').classList.add('hidden');
@@ -1907,6 +1921,7 @@ function countdown(btn, sec){
   }, 1000);
 }
 async function sendCode(){
+  if (STAGING) return; // staging uses its separate password form
   $('login-err').textContent = '';
   if (loginMode === 'phone') {
     if (BACKEND === 'local') {
@@ -1953,6 +1968,7 @@ async function sendCode(){
   }
 }
 async function doLogin(){
+  if (STAGING) return;
   $('login-err').textContent = '';
   var token = ($('token').value||'').trim();
   if (BACKEND === 'local') {
@@ -2005,6 +2021,7 @@ async function doLogout(){
   /* 同步就退回登录页：状态已清空，不能让 app 视图再露着（否则清空到 show 之间
      的点击会拿空 S 去渲染）；这里也不会误清新登录用户——此时还没有任何 await。 */
   closeSheet(); show('view-login');
+  if (STAGING && stagingAuthView) stagingAuthView.reset();
   var note = '';
   if (BACKEND === 'local') {
     try {
@@ -2381,9 +2398,11 @@ $('btn-pair-logout').onclick = doLogout;   /* H-3-PAIR：view-pair 的退出登�
     initCloud();
     if (BACKEND === 'local') {
       if (STAGING) {
+        applyStagingAuthUi();
         var callbackHash = location.hash;
         history.replaceState(null, '', location.pathname);
-        await localApi.auth.consumeCallback(callbackHash);
+        var callbackResult = await localApi.auth.consumeCallback(callbackHash);
+        if (callbackResult === 'recovery') { stagingAuthView.showRecovery(); show('view-login'); return; }
       }
       var ls = await LB.getSession();
       if (ls && ls.userId) { await afterLogin(); }
@@ -2395,7 +2414,8 @@ $('btn-pair-logout').onclick = doLogout;   /* H-3-PAIR：view-pair 的退出登�
     }
   } catch(e){
     show('view-login');
-    $('login-err').textContent = (BACKEND === 'local' ? '本地后端连接失败：' : '连接失败：')
+    if (STAGING && stagingAuthView) { stagingAuthView.showError(e); return; }
+    $('login-err').textContent = (STAGING ? '预生产环境连接失败：' : (BACKEND === 'local' ? '本地后端连接失败：' : '连接失败：'))
       + (e && e.message || '请检查本地服务是否已启动（GoTrue :9999 / PostgREST :3000）');
   }
 })();
