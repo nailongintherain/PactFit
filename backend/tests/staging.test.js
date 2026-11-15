@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const {execFileSync} = require('node:child_process');
+const {execFileSync,spawnSync} = require('node:child_process');
 const API = require('../client/pactfit-local-api');
 const root = require('node:path').join(__dirname, '../..');
 const config = {mode:'staging',supabaseUrl:'https://abcdefghijklmnopqrst.supabase.co',publicKey:'sb_publishable_test',redirectUrl:'https://pactfit-staging.pages.dev/'};
@@ -52,7 +52,17 @@ const mock=async(url,init)=>{
   await race.auth.signOut();
   finish(response({id:'late-user'}));
   await assert.rejects(callback,/session_stale/);
-  execFileSync('node',['scripts/build-staging.js'],{cwd:root,env:{...process.env,PACTFIT_STAGING_SUPABASE_URL:config.supabaseUrl,PACTFIT_STAGING_PUBLIC_KEY:config.publicKey,PACTFIT_STAGING_APP_ORIGIN:config.redirectUrl}});
+  const buildEnv={...process.env,PACTFIT_STAGING_SUPABASE_URL:config.supabaseUrl,PACTFIT_STAGING_PUBLIC_KEY:config.publicKey,PACTFIT_STAGING_APP_ORIGIN:config.redirectUrl};
+  for (const variable of ['PACTFIT_STAGING_SUPABASE_URL','PACTFIT_STAGING_PUBLIC_KEY','PACTFIT_STAGING_APP_ORIGIN']) {
+    const result=spawnSync('node',['scripts/build-staging.js'],{cwd:root,env:{...buildEnv,[variable]:''},encoding:'utf8'});
+    assert.notEqual(result.status,0);
+    assert.ok(result.stderr.includes('Missing build environment variable: '+variable));
+    assert.equal(result.stderr.includes(config.publicKey),false);
+  }
+  const invalid=spawnSync('node',['scripts/build-staging.js'],{cwd:root,env:{...buildEnv,PACTFIT_STAGING_SUPABASE_URL:'not-a-url'},encoding:'utf8'});
+  assert.notEqual(invalid.status,0);
+  assert.match(invalid.stderr,/Invalid URL in PACTFIT_STAGING_SUPABASE_URL/);
+  execFileSync('node',['scripts/build-staging.js'],{cwd:root,env:{...process.env,PACTFIT_STAGING_SUPABASE_URL:' '+config.supabaseUrl+' ',PACTFIT_STAGING_PUBLIC_KEY:' '+config.publicKey+' ',PACTFIT_STAGING_APP_ORIGIN:' '+config.redirectUrl+' '}});
   try {
     const html=fs.readFileSync(root+'/dist/index.html','utf8');
     const modeScript=html.match(/<script data-page-node-id="pfBackendMode">([\s\S]*?)<\/script>/)[1];
