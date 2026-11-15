@@ -24,7 +24,7 @@
 - Root directory：仓库根；Framework preset：None。
 - Build command：`node scripts/build-staging.js`。
 - Build output directory：`dist`；实际源码入口是 **web/index.html**，构建生成 dist/index.html。
-- Production 构建变量：按 `staging/env.example` 设置 `PACTFIT_STAGING_SUPABASE_URL`、`PACTFIT_STAGING_PUBLIC_KEY`、`PACTFIT_STAGING_APP_ORIGIN`。
+- Production 公开变量已写入 `wrangler.toml` 的 `[vars]`，与 `staging/env.example` 一致；无需重复在控制台设置。变量名为 `PACTFIT_STAGING_SUPABASE_URL`、`PACTFIT_STAGING_PUBLIC_KEY`、`PACTFIT_STAGING_APP_ORIGIN`。
 - Preview 默认不配置以阻止未配置构建；如需预览须单独配置其域名及精确回调 allowlist。
 
 这里 Production 指独立 staging Pages 项目，并非 WorkBuddy。不要向 Pages 添加 service_role、secret key、数据库密码或 SMTP 凭据。Cloudflare 域名确认后更新 APP_ORIGIN 和 Supabase 回调，再重新部署。
@@ -53,3 +53,5 @@ CI `.github/workflows/staging-checks.yml` 运行本地测试、生成迁移一�
 ## 同步及状态
 
 本代码由会话记录恢复为新提交，原 `6a201af` 不在远程。只有 GitHub 远程提交确认后才算代码交付成功；数据库迁移和 Pages 发布仍需按上述控制台步骤完成，构建通过不代表已上线。
+
+Pages 检测到含 pages_build_output_dir 的 wrangler.toml 后，以该文件管理支持的配置项。公开 URL/key/回调统一维护在 [vars]；修改最终域名时须更新此文件、staging/env.example 及 Supabase allowlist。Preview 显式为空，未配置独立回调前构建应拒绝。控制台填写正确不代表旧构建已收到变量，构建日志中的变量诊断是实际证据。

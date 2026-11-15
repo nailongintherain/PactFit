@@ -52,6 +52,14 @@ const mock=async(url,init)=>{
   await race.auth.signOut();
   finish(response({id:'late-user'}));
   await assert.rejects(callback,/session_stale/);
+  const wrangler=fs.readFileSync(root+'/wrangler.toml','utf8');
+  const sample=fs.readFileSync(root+'/staging/env.example','utf8');
+  const production=wrangler.split('[vars]')[1].split('[env.preview.vars]')[0];
+  for(const line of sample.split('\n').filter(l=>l.startsWith('PACTFIT_STAGING_'))) {
+    const split=line.indexOf('=');
+    assert.ok(production.includes(line.slice(0,split)+' = '+JSON.stringify(line.slice(split+1))));
+  }
+  assert.equal(wrangler.split('[env.preview.vars]')[1].trim(),'');
   const buildEnv={...process.env,PACTFIT_STAGING_SUPABASE_URL:config.supabaseUrl,PACTFIT_STAGING_PUBLIC_KEY:config.publicKey,PACTFIT_STAGING_APP_ORIGIN:config.redirectUrl};
   for (const variable of ['PACTFIT_STAGING_SUPABASE_URL','PACTFIT_STAGING_PUBLIC_KEY','PACTFIT_STAGING_APP_ORIGIN']) {
     const result=spawnSync('node',['scripts/build-staging.js'],{cwd:root,env:{...buildEnv,[variable]:''},encoding:'utf8'});

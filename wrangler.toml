@@ -1,3 +1,13 @@
 name = "pactfit-staging"
 pages_build_output_dir = "dist"
 compatibility_date = "2026-11-14"
+
+# Public browser configuration. Pages reads this file as its configuration source.
+# Never put service_role, secret keys, database passwords, or SMTP credentials here.
+[vars]
+PACTFIT_STAGING_SUPABASE_URL = "https://ksridewbjuwckuvougma.supabase.co"
+PACTFIT_STAGING_PUBLIC_KEY = "sb_publishable_yjxvLusNTFj5ft8UeMEBKg_qzI5oxJw"
+PACTFIT_STAGING_APP_ORIGIN = "https://pactfit-staging.pages.dev"
+
+# Preview requires a separately configured exact callback origin; no default credentials.
+[env.preview.vars]
