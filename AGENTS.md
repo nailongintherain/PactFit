@@ -72,3 +72,12 @@ compose.yaml         PostgreSQL 17 / GoTrue v2.197.0 / PostgREST v16.5 / Mailpit
 - staging 认证使用独立邮箱＋密码页面 `web/pactfit-staging-auth.js`；Docker 保持链接登录。密码仅经本项目 HTTPS Auth 接口传输，不持久化或写日志。新增回归 `node backend/tests/staging-password.test.js`；无邮件注册须在 staging Supabase 关闭 Confirm email，旧无密码账号通过 recovery 设置密码。
 
 - staging 已保存记录与编辑区分开；`summarizeSavedRecords` 仅汇总当前账号和空间的服务端行，不把草稿或起始体重当打卡。新增回归 `node backend/tests/staging-records.test.js`。
+
+## PactFit V2 独立改版
+
+- V2 基线为 187d10d，新分支 feat/pactfit-v2-product-redesign；入口 web/v2/，说明 v2/README.md。
+- 禁止将 V2 迁移应用到已有 staging 或覆盖 V1 数据。V2 的 03-v2-preview.sql 只新增 v2_* 对象，不依赖旧业务表。
+- scripts/v2-up.sh 使用独立 compose 项目、数据库和随机 .env.v2，启动后端及 http://127.0.0.1:18899/v2/。
+- 身份、当前空间、健康源数据、空间打卡和共享授权分离。隐私必须在 v2_snapshot 和 RLS/RPC 中落实，不可只隐藏前端。
+- 所有业务写入经 v2_command 原子校验；保留并发锁、服务端额度/权限/奖励幂等检查。宝石商品价格和上限未批准前保持禁用。
+- 新测试：backend/tests/v2/client.test.js、build.test.js、scripts/check-v2-db.sh、browser.test.js（真实隔离 Docker 后端）。

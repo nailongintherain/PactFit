@@ -1,0 +1,12 @@
+{
+  "name": "pactfit-v2-preview-tests",
+  "private": true,
+  "version": "2.0.0-preview",
+  "description": "Optional browser test tooling; the app itself has no runtime npm dependency",
+  "scripts": {
+    "test:browser": "node ../backend/tests/v2/browser.test.js"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
+  }
+}

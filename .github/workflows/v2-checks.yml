@@ -1,0 +1,42 @@
+name: V2 Preview checks
+on:
+  push:
+    branches: [feat/pactfit-v2-product-redesign]
+  pull_request:
+    paths: ['web/v2/**', 'v2/**', 'db/migrations/*v2*.sql', 'backend/tests/v2/**', 'scripts/*v2*']
+permissions:
+  contents: read
+jobs:
+  contracts-and-database:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - run: node backend/tests/pactfit-be.test.js
+      - run: node backend/client/pactfit-local-api.test.js
+      - run: node backend/tests/pactfit-sw.test.js
+      - run: node backend/tests/staging.test.js
+      - run: node backend/tests/staging-password.test.js
+      - run: node backend/tests/staging-records.test.js
+      - run: node backend/tests/v2/client.test.js
+      - run: node backend/tests/v2/build.test.js
+      - run: ./scripts/check-v2-db.sh
+  live-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --prefix v2
+      - run: ./v2/node_modules/.bin/playwright install --with-deps chromium
+      - run: ./scripts/v2-up.sh
+      - run: npm --prefix v2 run test:browser
+      - if: always()
+        run: ./scripts/v2-down.sh

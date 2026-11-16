@@ -41,4 +41,11 @@ done
 chmod a+rx web/v2
 chmod a+r web/v2/*.html web/v2/*.js web/v2/*.css
 cpv2 up -d postgrest web
+for endpoint in http://127.0.0.1:13000/ http://127.0.0.1:18899/v2/; do
+ for attempt in {1..40}; do
+  if curl -fsS "$endpoint" >/dev/null 2>&1; then break; fi
+  sleep 1
+  if [ "$attempt" = 40 ]; then echo "V2 service not ready: $endpoint" >&2; exit 1; fi
+ done
+done
 printf 'V2 Preview: http://127.0.0.1:18899/v2/\nMailpit (local mail only): http://127.0.0.1:18025\n'

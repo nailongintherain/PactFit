@@ -1,0 +1,11 @@
+name = "pactfit-v2-preview"
+pages_build_output_dir = "dist"
+compatibility_date = "2026-11-16"
+
+# Configure a NEW isolated Supabase project before deployment. These placeholders deliberately fail validation.
+[vars]
+PACTFIT_V2_SUPABASE_URL = "CONFIGURE_NEW_ISOLATED_SUPABASE_PROJECT"
+PACTFIT_V2_PUBLIC_KEY = "CONFIGURE_PUBLIC_PUBLISHABLE_KEY"
+PACTFIT_V2_APP_ORIGIN = "https://pactfit-v2-preview.pages.dev"
+
+[env.preview.vars]

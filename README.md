@@ -384,3 +384,10 @@ node backend/tests/pactfit-sw.test.js           # 16/16
 - 恢复演练的**脚本**入仓（`backend/schema/drill/`、`scripts/drill-*.py`）；**产物**不入仓 ——
   `20_import.sql`、`expected.json`、`pactfit-actual.json` 一律生成在 `$HOME/PactFit-drill/`（0700 / 0600）。
 - 演练文档只写计数、布尔、SQLSTATE，不写用户 ID、昵称、空间口令、体重、备注、邮箱。
+
+## V2.0 Preview（独立改版分支）
+
+当前完整独立开发基线上的改版位于 `feat/pactfit-v2-product-redesign`，入口为 `web/v2/`。
+运行 `./scripts/v2-up.sh`，打开 http://127.0.0.1:18899/v2/。
+这是新数据库/新端口上的真实后端预览，不覆盖前文记录的旧版本或现有 staging。
+架构、验收流程、测试与独立 Pages/Supabase 配置见 [v2/README.md](v2/README.md)。
