@@ -63,13 +63,30 @@ async function snapshot(email, space = null) {
       await page.locator("#auth-email").fill(email);
       await page.locator("#auth-password").fill(PASSWORD);
       await page.locator("#auth-form button[type=submit]").click();
-      await page.locator(".sidebar .profile-block").waitFor();
+      await page.locator(".bottom-nav").waitFor();
       pages.push(page);
     }
     const [a, b, c] = pages;
     async function action(page, name, attrs = "") {
+      if (
+        [
+          "profile",
+          "create-space",
+          "join-space",
+          "switch-space",
+          "expand-space",
+          "space-details",
+        ].includes(name) &&
+        !(await page.evaluate(() =>
+          document.body.classList.contains("sidebar-open"),
+        ))
+      ) {
+        await page.locator('[data-action="open-sidebar"]').click();
+      }
       await page
-        .locator(`[data-action="${name}"]${attrs}:visible`)
+        .locator(
+          `${name === "close-sidebar" ? "button" : ""}[data-action="${name}"]${attrs}:visible`,
+        )
         .first()
         .click();
     }
@@ -100,7 +117,6 @@ async function snapshot(email, space = null) {
     async function setPage(page, name) {
       if (
         name === "settings" &&
-        page.viewportSize().width <= 700 &&
         !(await page.evaluate(() =>
           document.body.classList.contains("sidebar-open"),
         ))
@@ -283,7 +299,52 @@ async function snapshot(email, space = null) {
       (await snapshot(emails[0])).awards.filter((x) => x.space_id).length,
       1,
     );
-    // Side drawer, large fonts, long names and both layouts must remain usable.
+    // Desktop/tablet viewports must retain the same single-column phone UI.
+    for (const width of [320, 390, 768, 1440]) {
+      await a.setViewportSize({ width, height: 900 });
+      const app = await a.locator("#app").boundingBox();
+      const nav = await a.locator(".bottom-nav").boundingBox();
+      assert.equal(Math.round(app.width), Math.min(width, 430));
+      assert.ok(
+        Math.abs(
+          app.x -
+            ((await a.evaluate(() => document.documentElement.clientWidth)) -
+              app.width) /
+              2,
+        ) < 1,
+      );
+      assert.ok(
+        Math.abs(nav.x - app.x) < 1 && Math.abs(nav.width - app.width) < 1,
+      );
+      assert.equal(await a.locator(".desktop-tabs").count(), 0);
+      assert.equal(await a.locator(".sidebar").isVisible(), false);
+      assert.equal(
+        await a
+          .locator(".home-grid")
+          .evaluate(
+            (el) => getComputedStyle(el).gridTemplateColumns.split(" ").length,
+          ),
+        1,
+      );
+      await action(a, "open-sidebar");
+      const drawer = await a.locator(".drawer-layer").boundingBox();
+      assert.ok(
+        Math.abs(drawer.x - app.x) < 1 &&
+          Math.abs(drawer.width - app.width) < 1,
+      );
+      assert.equal(
+        await a.locator(".workspace").evaluate((el) => el.inert),
+        true,
+      );
+      await action(a, "close-sidebar");
+      await action(a, "record");
+      const sheet = await a.locator(".modal-scrim").boundingBox();
+      assert.ok(
+        Math.abs(sheet.x - app.x) < 1 && Math.abs(sheet.width - app.width) < 1,
+      );
+      await action(a, "close-modal");
+    }
+    // Large fonts, long names and appearance preferences on the same phone layout.
     await a.setViewportSize({ width: 390, height: 844 });
     await action(a, "open-sidebar");
     await action(a, "page", '[data-page="settings"]');
@@ -338,7 +399,7 @@ async function snapshot(email, space = null) {
     assert.deepEqual(forbidden, []);
     assert.deepEqual(errors, []);
     console.log(
-      "PASS V2 live browser: real signup, private/teams, application/invitation approval, optional-weight records, RLS/privacy revocation, captain succession, removal/dissolution, honors/ledger, likes, mobile/dark/font settings",
+      "PASS V2 live browser: real signup, private/teams, application/invitation approval, optional-weight records, RLS/privacy revocation, captain succession, removal/dissolution, honors/ledger, likes, phone-width canvas on all screens, drawers/sheets/navigation, dark/font settings",
     );
   } finally {
     await browser.close();

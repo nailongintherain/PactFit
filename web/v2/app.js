@@ -91,6 +91,13 @@
       preferences();
     } catch (_) {}
   });
+  function setSidebar(open) {
+    document.body.classList.toggle("sidebar-open", open);
+    const layer = $(".drawer-layer"),
+      workspace = $(".workspace");
+    if (layer) layer.inert = !open;
+    if (workspace) workspace.inert = open;
+  }
   function errorNotice(text) {
     return `<div class="notice error row between" role="alert"><span>${e(text)}</span><button class="text-btn" data-action="refresh">重试</button></div>`;
   }
@@ -111,7 +118,7 @@
     const teamSpaces = d.spaces.filter((s) => s.kind === "team");
     const spaceRow = (s) =>
       `<div class="space-row ${s.id === d.space.id ? "active" : ""}"><button class="space-select" data-action="switch-space" data-id="${s.id}" title="${e(s.name)}">${avatar(s, "sm")}<span class="truncate sidebar-text">${e(s.name)}</span></button>${s.kind === "team" ? `<button class="icon-btn" data-action="expand-space" data-id="${s.id}" aria-label="展开 ${e(s.name)} 的成员" aria-expanded="${st.expanded.has(s.id)}">${icon("chevron", 14)}</button><button class="icon-btn" data-action="space-details" data-id="${s.id}" aria-label="${e(s.name)} 详情">${icon("more", 16)}</button>` : ""}</div>${st.expanded.has(s.id) ? `<div class="sidebar-members">${s.members.map((m) => `<div class="row">${avatar(m, "sm")}<span class="small truncate">${e(m.nickname)}${m.captain ? " · 队长" : ""}</span></div>`).join("")}</div>` : ""}`;
-    return `<div class="sidebar-brand row"><div class="row"><span class="brand-mark">p.</span><span class="brand">PactFit</span></div><button class="icon-btn" data-action="collapse-sidebar" aria-label="折叠侧边栏">${icon("menu", 16)}</button></div><button class="row profile-block" data-action="profile">${avatar(d.me)}<span class="grow" style="text-align:left"><b class="truncate" style="display:block">${e(d.me.nickname)}</b><small>${e(d.me.public_id)}</small></span></button><div class="stack" style="gap:9px"><button class="btn full" data-action="create-space">${icon("plus")}<span class="sidebar-text">创建新空间</span></button><button class="btn ghost full" data-action="join-space">${icon("users")}<span class="sidebar-text">输入空间口令</span></button></div><div><div class="sidebar-label">只属于你 · PRIVATE</div>${d.spaces
+    return `<div class="sidebar-brand row"><div class="row"><span class="brand-mark">p.</span><span class="brand">PactFit</span></div><button class="icon-btn" data-action="close-sidebar" aria-label="关闭侧边栏">${icon("close", 16)}</button></div><button class="row profile-block" data-action="profile">${avatar(d.me)}<span class="grow" style="text-align:left"><b class="truncate" style="display:block">${e(d.me.nickname)}</b><small>${e(d.me.public_id)}</small></span></button><div class="stack" style="gap:9px"><button class="btn full" data-action="create-space">${icon("plus")}<span class="sidebar-text">创建新空间</span></button><button class="btn ghost full" data-action="join-space">${icon("users")}<span class="sidebar-text">输入空间口令</span></button></div><div><div class="sidebar-label">只属于你 · PRIVATE</div>${d.spaces
       .filter((s) => s.kind === "private")
       .map(spaceRow)
       .join(
@@ -122,15 +129,15 @@
     const d = st.data;
     if (!d) return;
     const pending = d.requests.filter((r) => r.can_respond).length;
-    const nav = (mobile) =>
+    const nav = () =>
       pages
         .map(
           ([id, title, ico]) =>
-            `<button data-action="page" data-page="${id}" class="${st.page === id ? "active" : ""}">${mobile ? icon(ico, 22) : ""}<span>${title}${id === "messages" && pending ? " · " + pending : ""}</span></button>`,
+            `<button data-action="page" data-page="${id}" class="${st.page === id ? "active" : ""}">${icon(ico, 22)}<span>${title}${id === "messages" && pending ? " · " + pending : ""}</span></button>`,
         )
         .join("");
     $("#app").innerHTML =
-      `<div class="shell"><div class="scrim" data-action="close-sidebar"></div><aside class="sidebar" aria-label="空间与账号">${sidebar()}</aside><div class="workspace"><header class="topbar"><div class="row"><button class="icon-btn mobile-only" data-action="open-sidebar" aria-label="打开空间侧边栏">${icon("menu")}</button><div class="context"><span class="muted">${d.space.kind === "private" ? icon("lock", 15) : icon("users", 15)}</span><span class="truncate" style="max-width:220px">${e(d.space.name)}</span><span class="tag">${d.space.kind === "private" ? "私人" : "团队"}</span></div></div><nav class="desktop-tabs" aria-label="主页面">${nav(false)}</nav><div class="row"><button class="icon-btn" data-action="refresh" aria-label="刷新空间数据">${icon("clock")}</button><button class="icon-btn" data-action="page" data-page="messages" aria-label="查看消息">${icon("bell")}</button></div></header><main class="main" id="main-content">${st.error ? errorNotice(st.error) : ""}${st.loading ? '<div class="empty" role="status">正在读取空间…</div>' : pageView()}</main><nav class="bottom-nav" aria-label="主页面">${nav(true)}</nav>${st.page === "home" && !st.loading ? `<button class="btn float-add" data-action="record">${icon("plus", 21)} 添加今日记录</button>` : ""}</div></div>`;
+      `<div class="shell"><div class="drawer-layer" ${document.body.classList.contains("sidebar-open") ? "" : "inert"}><div class="scrim" data-action="close-sidebar"></div><aside class="sidebar" aria-label="空间与账号">${sidebar()}</aside></div><div class="workspace" ${document.body.classList.contains("sidebar-open") ? "inert" : ""}><header class="topbar"><div class="row"><button class="icon-btn drawer-toggle" data-action="open-sidebar" aria-label="打开空间侧边栏">${icon("menu")}</button><div class="context"><span class="muted">${d.space.kind === "private" ? icon("lock", 15) : icon("users", 15)}</span><span class="truncate" style="max-width:220px">${e(d.space.name)}</span><span class="tag">${d.space.kind === "private" ? "私人" : "团队"}</span></div></div><div class="row"><button class="icon-btn" data-action="refresh" aria-label="刷新空间数据">${icon("clock")}</button><button class="icon-btn" data-action="page" data-page="messages" aria-label="查看消息">${icon("bell")}</button></div></header><main class="main" id="main-content">${st.error ? errorNotice(st.error) : ""}${st.loading ? '<div class="empty" role="status">正在读取空间…</div>' : pageView()}</main><nav class="bottom-nav" aria-label="主页面">${nav()}</nav>${st.page === "home" && !st.loading ? `<button class="btn float-add" data-action="record">${icon("plus", 21)} 添加今日记录</button>` : ""}</div></div>`;
   }
   function head(kicker, title, sub, action = "") {
     return `<header class="page-head"><div><div class="eyebrow">${kicker}</div><h1 style="margin-top:9px">${title}</h1><p>${sub}</p></div>${action}</header>`;
@@ -655,7 +662,7 @@
     st.space = null;
     st.busy = false;
     closeModal();
-    document.body.classList.remove("sidebar-open");
+    setSidebar(false);
     st.authMode = "signin";
     const pending = api.logout();
     authView();
@@ -695,17 +702,11 @@
       return;
     }
     if (a === "open-sidebar") {
-      document.body.classList.add("sidebar-open");
+      setSidebar(true);
       return;
     }
     if (a === "close-sidebar") {
-      document.body.classList.remove("sidebar-open");
-      return;
-    }
-    if (a === "collapse-sidebar") {
-      if (matchMedia("(max-width:700px)").matches)
-        document.body.classList.remove("sidebar-open");
-      else document.body.classList.toggle("sidebar-collapsed");
+      setSidebar(false);
       return;
     }
     if (!st.data) return;
@@ -713,13 +714,13 @@
       sp = d.space.id;
     if (a === "page") {
       st.page = el.dataset.page;
-      document.body.classList.remove("sidebar-open");
+      setSidebar(false);
       shell();
       window.scrollTo(0, 0);
       return;
     }
     if (a === "switch-space") {
-      document.body.classList.remove("sidebar-open");
+      setSidebar(false);
       st.space = el.dataset.id;
       await load(st.space);
       return;
@@ -759,11 +760,12 @@
         "change-password",
       ].includes(a)
     ) {
-      document.body.classList.remove("sidebar-open");
+      setSidebar(false);
       openModal(a);
       return;
     }
     if (a === "space-details") {
+      setSidebar(false);
       await showSpaceDetails(el.dataset.id);
       return;
     }
@@ -1123,7 +1125,7 @@
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !st.busy) {
       if (st.modal) closeModal();
-      else document.body.classList.remove("sidebar-open");
+      else setSidebar(false);
     }
     if (event.key === "Tab" && st.modal) {
       const nodes = [

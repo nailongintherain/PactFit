@@ -81,3 +81,5 @@ compose.yaml         PostgreSQL 17 / GoTrue v2.197.0 / PostgREST v16.5 / Mailpit
 - 身份、当前空间、健康源数据、空间打卡和共享授权分离。隐私必须在 v2_snapshot 和 RLS/RPC 中落实，不可只隐藏前端。
 - 所有业务写入经 v2_command 原子校验；保留并发锁、服务端额度/权限/奖励幂等检查。宝石商品价格和上限未批准前保持禁用。
 - 新测试：backend/tests/v2/client.test.js、build.test.js、scripts/check-v2-db.sh、browser.test.js（真实隔离 Docker 后端）。
+
+- V2 只维护手机布局：最大 430px 居中画布，宽屏留白；任何窗口均使用底部导航、抽屉侧栏、底部弹层和单列页面，不恢复桌面断点或桌面专用交互。
