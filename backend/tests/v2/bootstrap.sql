@@ -7,3 +7,6 @@ CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$ SELECT nullif(
 GRANT USAGE ON SCHEMA auth TO authenticated;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon,authenticated;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO anon,authenticated;
+-- Sentinel emulates a pre-existing V1 object; V2 must not alter its rows or grants.
+CREATE TABLE public.records(id integer PRIMARY KEY, note text NOT NULL);
+INSERT INTO public.records VALUES(1,'synthetic V1 sentinel');

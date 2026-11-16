@@ -88,3 +88,17 @@ new_team=command(200,'create_space',{'name':'全新团队'})['data']['space_id']
 assert snapshot(200,new_team)['space']['limit']==6
 assert snapshot(200)['gems']==wallet
 print('PASS concurrent quotas/seats, idempotent rewards/purchases, no overdraft, authorization revocation, team-bound entitlements')
+
+# Dissolve/recreate cannot farm team achievement gems with the same accounts.
+for person in [400,401]: init(person)
+for round_number in range(2):
+    team=command(400,'create_space',{'name':f'防刷团队{round_number}'})['data']['space_id']
+    public_id=snapshot(401)['me']['public_id']
+    assert command(400,'invite',{'space_id':team,'public_id':public_id})['ok']
+    pending=next(r for r in snapshot(401)['requests'] if r['status']=='pending')
+    assert command(401,'respond',{'request_id':pending['id'],'accept':True})['ok']
+    for person in [400,401]: assert command(person,'checkin',{'space_id':team})['ok']
+    assert snapshot(400)['gems']==3 and snapshot(401)['gems']==3
+    assert command(400,'dissolve',{'space_id':team,'confirm':'DISSOLVE'})['ok']
+assert len(snapshot(400)['awards'])==3  # first badge + historical honors from two teams
+print('PASS team rotation cannot farm gems; historical team honors retained')

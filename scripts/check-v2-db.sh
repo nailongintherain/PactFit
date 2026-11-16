@@ -11,8 +11,11 @@ for attempt in {1..40}; do
 done
 if [ "$ready" != true ]; then docker logs "$container"; exit 1; fi
 docker exec -i "$container" psql -h 127.0.0.1 -U postgres -v ON_ERROR_STOP=1 < backend/tests/v2/bootstrap.sql >/dev/null
-docker exec -i "$container" psql -h 127.0.0.1 -U postgres -v ON_ERROR_STOP=1 < db/migrations/03-v2-preview.sql >/dev/null
-docker exec -i "$container" psql -h 127.0.0.1 -U postgres -v ON_ERROR_STOP=1 < db/migrations/03-v2-preview.sql >/dev/null
+for repetition in 1 2; do
+ for migration in db/migrations/0[34]-v2-*.sql; do
+  docker exec -i "$container" psql -h 127.0.0.1 -U postgres -v ON_ERROR_STOP=1 < "$migration" >/dev/null
+ done
+done
 for test_file in backend/tests/v2/*-db.sql; do
  docker exec -i "$container" psql -h 127.0.0.1 -U postgres -v ON_ERROR_STOP=1 < "$test_file"
 done

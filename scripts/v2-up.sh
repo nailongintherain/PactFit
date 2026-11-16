@@ -28,7 +28,15 @@ for attempt in {1..60}; do
  sleep 1
  if [ "$attempt" = 60 ]; then echo 'V2 Auth did not become ready; inspect docker compose logs' >&2; exit 1; fi
 done
-cpv2 exec -T db psql -U postgres -d pactfit_v2 -v ON_ERROR_STOP=1 < db/migrations/03-v2-preview.sql >/dev/null
+for migration in db/migrations/0[34]-v2-*.sql; do
+ version="$(basename "$migration" .sql)"
+ has_journal=$(cpv2 exec -T db psql -U postgres -d pactfit_v2 -Atc "SELECT to_regclass('public.v2_migrations') IS NOT NULL")
+ if [ "$has_journal" = t ]; then
+  applied=$(cpv2 exec -T db psql -U postgres -d pactfit_v2 -Atc "SELECT EXISTS(SELECT FROM public.v2_migrations WHERE version='$version')")
+  if [ "$applied" = t ]; then continue; fi
+ fi
+ cpv2 exec -T db psql -U postgres -d pactfit_v2 -v ON_ERROR_STOP=1 < "$migration" >/dev/null
+done
 # Static assets contain no credentials; nginx workers must be able to read a restrictive checkout.
 chmod a+rx web/v2
 chmod a+r web/v2/*.html web/v2/*.js web/v2/*.css
