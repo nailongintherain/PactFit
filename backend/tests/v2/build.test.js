@@ -49,6 +49,11 @@ try {
   );
   for (const file of ["app.js", "model.js", "api.js", "style.css"])
     assert.ok(fs.existsSync(path.join(output, file)));
+  const style = fs.readFileSync(path.join(output, "style.css"), "utf8");
+  assert.match(style, /--phone-width:\s*430px/);
+  assert.match(style, /width:\s*min\(100%,\s*var\(--phone-width\)\)/);
+  assert.doesNotMatch(style, /@media\s*\(min-width:/);
+  assert.match(index, /name="theme-color" content="#b84a34"/);
   assert.equal(fs.existsSync(path.join(output, "pactfit-be.js")), false);
   for (const [f, before] of originals)
     assert.equal(fs.readFileSync(path.join(root, f), "utf8"), before);

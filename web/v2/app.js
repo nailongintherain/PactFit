@@ -39,7 +39,7 @@
   const empty = (text) => `<div class="empty">${text}</div>`;
   const number = (v) =>
     v === null || v === undefined ? "—" : Number(v).toFixed(1);
-  const art = `<div class="leaf-art" aria-hidden="true"><svg viewBox="0 0 160 120" fill="none"><path d="M79 108V38" stroke="#728966" stroke-width="3"/><path d="M78 75C34 83 26 38 34 25c29-1 49 20 44 50Z" fill="#b0c59c"/><path d="M80 59c-6-31 18-48 43-45 7 31-10 46-43 45Z" fill="#7d9f71"/><path d="M80 97c1-30 25-40 49-32-2 28-22 38-49 32Z" fill="#cddbb7"/><path d="M79 76 46 40m35 18 28-29m-29 68 35-22" stroke="#5c7f52" stroke-width="1.5"/><ellipse cx="80" cy="110" rx="38" ry="4" fill="#dce6d0"/></svg></div>`;
+  const art = `<div class="brand-art" aria-hidden="true"><svg viewBox="0 0 160 120" fill="none"><path d="M26 88c18-22 34-34 53-36 20-2 34 10 55-20" stroke="#b84a34" stroke-width="12" stroke-linecap="round"/><path d="M26 88c18-22 34-34 53-36 20-2 34 10 55-20" stroke="#fff8eb" stroke-width="5" stroke-linecap="round" stroke-dasharray="3 17"/><path d="M29 73c9 0 16 7 16 16s-7 16-16 16-16-7-16-16 7-16 16-16Z" fill="#f4b64f"/><path d="M122 18c12 0 21 9 21 21s-9 21-21 21-21-9-21-21 9-21 21-21Z" fill="#f47763"/><path d="m115 30 8 8 13-16" stroke="#fff8eb" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/><ellipse cx="80" cy="110" rx="48" ry="4" fill="#ecd4c2"/></svg></div>`;
   const companionLabels = {
     default: "默认伙伴图标",
     waiting: "今天还没有记录",

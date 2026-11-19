@@ -1,18 +1,18 @@
 @import url("https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap");
 :root {
   color-scheme: light;
-  --bg: #f7f8f3;
-  --surface: #fff;
-  --ink: #263b32;
-  --muted: #7a857d;
-  --line: #e6ebe3;
-  --green: #315c44;
-  --soft: #eaf1e7;
-  --lime: #d8e8bc;
-  --peach: #fae8db;
-  --amber: #f1ce8a;
-  --danger: #ad4d3f;
-  --shadow: 0 12px 40px #203d3110;
+  --bg: #fff8ef;
+  --surface: #fffdfa;
+  --ink: #40271d;
+  --muted: #8a7062;
+  --line: #efddcf;
+  --primary: #b84a34;
+  --soft: #fff0df;
+  --lime: #ffe0a3;
+  --peach: #ffe2d4;
+  --amber: #f4b64f;
+  --danger: #a93c32;
+  --shadow: 0 12px 40px #6b2e1b12;
   font-size: 15px;
 }
 * {
@@ -55,7 +55,7 @@ button {
   background: transparent;
 }
 a {
-  color: var(--green);
+  color: var(--primary);
 }
 svg {
   vertical-align: middle;
@@ -133,7 +133,7 @@ small,
   justify-content: center;
   width: 38px;
   height: 38px;
-  background: var(--green);
+  background: var(--primary);
   color: #fff;
   border-radius: 13px;
   font-size: 1.65rem;
@@ -199,13 +199,13 @@ small,
   padding: 4px 9px;
   border-radius: 7px;
   background: var(--soft);
-  color: var(--green);
+  color: var(--primary);
   font-size: 0.72rem;
   font-weight: 600;
 }
 .tag.warm {
   background: var(--peach);
-  color: #956443;
+  color: #994a36;
 }
 .tag.important {
   background: #f6e0db;
@@ -246,7 +246,7 @@ small,
   border: 2px solid var(--surface);
 }
 .dot.done {
-  background: #6f9c54;
+  background: #f4b64f;
 }
 .icon-btn {
   width: 38px;
@@ -269,14 +269,14 @@ small,
   min-height: 44px;
   padding: 11px 18px;
   border-radius: 12px;
-  background: var(--green);
+  background: var(--primary);
   color: #fff;
   font-weight: 600;
   line-height: 1.4;
 }
 .btn.secondary {
   background: var(--soft);
-  color: var(--green);
+  color: var(--primary);
 }
 .btn.ghost {
   background: transparent;
@@ -294,7 +294,7 @@ small,
 }
 .text-btn {
   font-size: 0.82rem;
-  color: var(--green);
+  color: var(--primary);
   text-decoration: underline;
   text-underline-offset: 4px;
 }
@@ -476,7 +476,7 @@ small,
   align-items: start;
 }
 .hero {
-  background: var(--green);
+  background: linear-gradient(145deg, #a93f2d 0%, #cf5a40 60%, #e67757 100%);
   color: #fff;
   border: 0;
   padding: 30px;
@@ -500,7 +500,7 @@ small,
 }
 .hero small,
 .hero .eyebrow {
-  color: #c6d8c9;
+  color: #ffe1d2;
 }
 .hero h2 {
   font-size: 1.5rem;
@@ -545,7 +545,7 @@ small,
   height: 96px;
   border-radius: 28px;
   padding: 6px;
-  box-shadow: 0 12px 30px #14291e33;
+  box-shadow: 0 12px 30px #5b241d38;
 }
 .saved-hint {
   font-size: 0.78rem;
@@ -583,7 +583,7 @@ small,
 .progress i {
   display: block;
   height: 100%;
-  background: #86a967;
+  background: #e66f52;
   border-radius: 20px;
 }
 .progress.warm i {
@@ -603,12 +603,12 @@ small,
 .check {
   height: 23px;
   width: 23px;
-  border: 1px solid #cdd7ca;
+  border: 1px solid #e8cfc1;
   border-radius: 8px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--green);
+  color: var(--primary);
   flex: none;
 }
 .check.on {
@@ -620,7 +620,7 @@ small,
   color: var(--muted);
 }
 .task input {
-  accent-color: var(--green);
+  accent-color: var(--primary);
   width: 20px;
   height: 20px;
   flex: none;
@@ -639,19 +639,19 @@ small,
   padding: 9px 13px;
   border-radius: 12px;
   background: var(--peach);
-  color: #8d6149;
+  color: #994a36;
   font-size: 0.83rem;
 }
-.leaf-art {
+.brand-art {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #f0f4e9;
+  background: #fff1df;
   border-radius: 18px;
   min-height: 130px;
   margin-bottom: 18px;
 }
-.leaf-art svg {
+.brand-art svg {
   width: 130px;
   height: 110px;
 }
@@ -660,7 +660,7 @@ small,
   bottom: 30px;
   left: 50%;
   transform: translateX(-50%);
-  box-shadow: 0 8px 24px #315c4440;
+  box-shadow: 0 8px 24px #b84a3440;
   z-index: 15;
   border-radius: 30px;
   padding: 15px 26px;
@@ -700,8 +700,8 @@ small,
 }
 .chip.active {
   background: var(--soft);
-  color: var(--green);
-  border-color: #b7ceaa;
+  color: var(--primary);
+  border-color: #e9b3a2;
 }
 .chart {
   width: 100%;
@@ -719,13 +719,13 @@ small,
   stroke: var(--line);
 }
 .chart polyline {
-  stroke: var(--green);
+  stroke: var(--primary);
   fill: none;
   stroke-width: 2.5;
   stroke-linejoin: round;
 }
 .chart circle {
-  fill: var(--green);
+  fill: var(--primary);
   stroke: var(--surface);
   stroke-width: 2;
 }
@@ -759,7 +759,7 @@ small,
 }
 .calendar .done {
   background: var(--soft);
-  color: var(--green);
+  color: var(--primary);
   font-weight: 600;
 }
 .timeline {
@@ -779,7 +779,7 @@ small,
   width: 9px;
   height: 9px;
   border: 3px solid var(--surface);
-  background: #94ae7d;
+  background: #f4b64f;
   border-radius: 50%;
   position: absolute;
   left: -29px;
@@ -882,7 +882,7 @@ small,
 }
 .milestone-other {
   background: var(--soft);
-  color: var(--green);
+  color: var(--primary);
 }
 .milestone-icon.mini {
   width: 42px;
@@ -927,11 +927,11 @@ small,
   margin-top: 20px;
 }
 .gem-card {
-  background: #ece6f7;
-  border-color: #e2d9ef;
+  background: #fff1c9;
+  border-color: #f0d28d;
 }
 .gem-card .weight-value {
-  color: #79649a;
+  color: #8f5819;
 }
 .shop-item {
   display: flex;
@@ -967,9 +967,9 @@ small,
   font-size: 0.9rem;
 }
 .tabs button.active {
-  color: var(--green);
+  color: var(--primary);
   font-weight: 600;
-  border-color: var(--green);
+  border-color: var(--primary);
 }
 .message-card {
   display: flex;
@@ -991,7 +991,7 @@ small,
   margin-top: 13px;
 }
 .message-card.unread {
-  border-left: 3px solid #83a46d;
+  border-left: 3px solid #e66f52;
 }
 .ledger-row {
   display: flex;
@@ -1002,7 +1002,7 @@ small,
   font-size: 0.82rem;
 }
 .ledger-row b.positive {
-  color: var(--green);
+  color: var(--primary);
 }
 .settings-row {
   padding: 17px 0;
@@ -1013,7 +1013,7 @@ small,
   gap: 15px;
 }
 .switch {
-  accent-color: var(--green);
+  accent-color: var(--primary);
   width: 19px;
   height: 19px;
   flex: none;
@@ -1030,7 +1030,7 @@ small,
 .modal-scrim {
   position: fixed;
   inset: 0;
-  background: #1c2e2955;
+  background: #40271d66;
   backdrop-filter: blur(3px);
   z-index: 60;
   display: flex;
@@ -1115,7 +1115,7 @@ small,
   pointer-events: none;
 }
 .avatar-picker input:checked + .avatar {
-  outline: 2px solid var(--green);
+  outline: 2px solid var(--primary);
   outline-offset: 3px;
 }
 .auth-layout {
@@ -1123,7 +1123,7 @@ small,
   display: grid;
 }
 .auth-story {
-  background: var(--green);
+  background: linear-gradient(155deg, #a93f2d 0%, #c9553d 62%, #e67757 100%);
   color: #fff;
   padding: 9vw;
   display: flex;
@@ -1138,12 +1138,12 @@ small,
   margin: 35px 0 22px;
 }
 .auth-story p {
-  color: #c7d7c8;
+  color: #ffe1d2;
   font-size: 0.95rem;
 }
 .auth-story .brand-mark {
   background: #e3ecce;
-  color: var(--green);
+  color: var(--primary);
 }
 .auth-art {
   margin-top: 40px;
@@ -1210,37 +1210,36 @@ small,
 }
 [data-theme="dark"] {
   color-scheme: dark;
-  --bg: #17241e;
-  --surface: #213029;
-  --ink: #e3eadf;
-  --muted: #a0afa1;
-  --line: #35463b;
-  --green: #9fbd8a;
-  --soft: #304534;
-  --lime: #3c5433;
-  --peach: #44382d;
-  --amber: #b5955c;
-  --danger: #d98678;
+  --bg: #241713;
+  --surface: #30201a;
+  --ink: #fff2e8;
+  --muted: #c9aa9b;
+  --line: #4b332a;
+  --primary: #ff8a6d;
+  --soft: #4a2d24;
+  --lime: #664a27;
+  --peach: #573329;
+  --amber: #e7aa45;
+  --danger: #ff8e7c;
   --shadow: 0 12px 40px #0002;
 }
 [data-theme="dark"] .btn:not(.secondary):not(.ghost):not(.danger) {
-  color: #15241a;
+  color: #2d1812;
 }
 [data-theme="dark"] .hero,
 [data-theme="dark"] .auth-story {
-  background: #2b4736;
-  color: #e6eddf;
+  background: linear-gradient(145deg, #713025 0%, #933c2d 55%, #b5523a 100%);
+  color: #fff2e8;
 }
 [data-theme="dark"] .gem-card {
-  background: #352f44;
-  border-color: #494056;
+  background: #49351f;
+  border-color: #644b2d;
 }
-[data-theme="dark"] .leaf-art {
-  background: #2c3b2b;
+[data-theme="dark"] .brand-art {
+  background: #422a20;
 }
-[data-theme="dark"] .badge .medal {
-  background: #4f472f;
-  color: #e3c36c;
+[data-theme="dark"] .gem-card .weight-value {
+  color: #f4c76e;
 }
 
 h1 {
@@ -1266,7 +1265,7 @@ h1 {
   display: block;
   position: fixed;
   inset: 0;
-  background: #192d2355;
+  background: #40271d66;
   z-index: 25;
 }
 .drawer-toggle {
@@ -1331,7 +1330,7 @@ h1 {
   min-width: 60px;
 }
 .bottom-nav button.active {
-  color: var(--green);
+  color: var(--primary);
   font-weight: 600;
 }
 .float-add {
@@ -1436,7 +1435,7 @@ html {
   min-height: 100%;
 }
 body {
-  background: #e9ede7;
+  background: #f1e4da;
 }
 #app {
   width: min(100%, var(--phone-width));
@@ -1511,5 +1510,5 @@ body {
   max-width: calc(min(100vw, var(--phone-width)) - 32px);
 }
 [data-theme="dark"] body {
-  background: #101b16;
+  background: #160e0b;
 }
