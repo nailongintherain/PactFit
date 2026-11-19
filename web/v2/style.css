@@ -140,6 +140,60 @@ small,
   font-weight: 700;
   font-family: Georgia, serif;
 }
+.companion {
+  display: inline-flex;
+  width: 46px;
+  height: 46px;
+  flex: none;
+  border-radius: 16px;
+  background: #f4b64f;
+  padding: 3px;
+  box-shadow: 0 5px 14px #4b281820;
+}
+.companion svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.companion-body,
+.companion-dial {
+  fill: #fff8eb;
+  stroke: #4b2818;
+  stroke-width: 5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.companion-dial {
+  stroke-width: 4;
+}
+.companion-tick,
+.companion-face {
+  fill: none;
+  stroke: #4b2818;
+  stroke-width: 5;
+  stroke-linecap: round;
+}
+.companion-needle,
+.companion-foot {
+  fill: #f47763;
+}
+.companion-eye {
+  fill: #4b2818;
+}
+.companion-status {
+  fill: #ffd24d;
+}
+.companion-smile {
+  fill: none;
+  stroke: #ffd24d;
+  stroke-width: 5;
+  stroke-linecap: round;
+}
+.companion.brand-companion {
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+}
 .tag {
   display: inline-flex;
   padding: 4px 9px;
@@ -475,6 +529,24 @@ small,
   position: relative;
   z-index: 1;
 }
+.hero-status {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  position: relative;
+  z-index: 1;
+}
+.hero-status .weight-value {
+  min-width: 0;
+}
+.companion.hero-companion {
+  width: 96px;
+  height: 96px;
+  border-radius: 28px;
+  padding: 6px;
+  box-shadow: 0 12px 30px #14291e33;
+}
 .saved-hint {
   font-size: 0.78rem;
   opacity: 0.85;
@@ -698,6 +770,9 @@ small,
 .timeline-item {
   position: relative;
   padding: 0 0 22px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 .timeline-item:before {
   content: "";
@@ -716,7 +791,7 @@ small,
 }
 .badge-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 .badge {
@@ -727,24 +802,129 @@ small,
   border: 1px solid var(--line);
   font-size: 0.77rem;
 }
-.badge .medal {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0 auto 11px;
-  width: 57px;
-  height: 57px;
-  border-radius: 20px;
-  background: #f7e8bd;
-  color: #8c681b;
-  font-size: 1.8rem;
-}
 .badge small {
   display: block;
   margin-top: 4px;
 }
 .badge.locked {
-  opacity: 0.55;
+  border-style: dashed;
+}
+.milestone-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 68px;
+  height: 68px;
+  margin: 0 auto 12px;
+  border-radius: 22px;
+  overflow: hidden;
+  flex: none;
+  transition: transform 0.18s ease;
+}
+.badge:hover .milestone-icon.achieved {
+  transform: translateY(-2px) rotate(-2deg);
+}
+.milestone-icon svg {
+  width: 100%;
+  height: 100%;
+}
+.milestone-icon.achieved {
+  box-shadow: 0 8px 18px #4b281820;
+}
+.milestone-icon.locked {
+  filter: saturate(0.25);
+  opacity: 0.56;
+}
+.milestone-step-shape {
+  fill: #fff8eb;
+}
+.milestone-accent {
+  fill: #f47763;
+}
+.milestone-icon.milestone-step {
+  background: #3465ad;
+}
+.milestone-routine {
+  background: #f4b64f;
+}
+.milestone-line,
+.milestone-hem {
+  fill: none;
+  stroke: #315c44;
+  stroke-width: 6;
+  stroke-linecap: round;
+}
+.milestone-towel-back {
+  fill: #fff8eb;
+  stroke: #315c44;
+  stroke-width: 3;
+}
+.milestone-towel {
+  fill: #315c44;
+}
+.milestone-fold {
+  fill: #fff8eb;
+}
+.milestone-together {
+  background: #b84a34;
+}
+.milestone-ribbon-a {
+  fill: #fff8eb;
+}
+.milestone-ribbon-b {
+  fill: #ffc64f;
+}
+.milestone-knot {
+  fill: none;
+  stroke: #fff8eb;
+  stroke-width: 8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.milestone-other {
+  background: var(--soft);
+  color: var(--green);
+}
+.milestone-icon.mini {
+  width: 42px;
+  height: 42px;
+  margin: 0;
+  border-radius: 13px;
+}
+.team-milestone {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  text-align: left;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--bg);
+}
+.team-milestone .milestone-icon {
+  margin: 0;
+}
+.team-milestone small {
+  display: block;
+  margin-top: 4px;
+}
+.team-milestone.locked {
+  border-style: dashed;
+}
+.award-detail {
+  text-align: center;
+  padding: 18px 8px;
+}
+.award-detail .milestone-icon.detail {
+  width: 104px;
+  height: 104px;
+  border-radius: 30px;
+}
+.award-detail h2 {
+  margin: 15px 0 4px;
+}
+.award-detail .notice {
+  margin-top: 20px;
 }
 .gem-card {
   background: #ece6f7;

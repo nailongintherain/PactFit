@@ -137,6 +137,11 @@ async function snapshot(email, space = null) {
       await page.locator("#field-mood").selectOption("还不错");
       await submit(page);
     }
+    await a.locator('[data-today-state="waiting"]').waitFor();
+    assert.equal(
+      await a.locator('.hero [data-companion-state="waiting"]').count(),
+      1,
+    );
     await action(a, "profile");
     await a.locator("#field-nickname").fill("晨光搭子");
     await submit(a);
@@ -152,6 +157,7 @@ async function snapshot(email, space = null) {
     await a.locator('[name="task"]').check();
     await a.locator("#field-note").fill("只在私人记录里的备注");
     await submit(a);
+    await a.locator('[data-today-state="recorded"]').waitFor();
     let state = await snapshot(emails[0]);
     assert.equal(state.my_records[0].weight, null);
     assert.equal(state.gems, 2);
@@ -253,8 +259,20 @@ async function snapshot(email, space = null) {
     await setPage(c, "home");
     await record(c);
     await refresh(a);
+    await a.locator('[data-today-state="together"]').waitFor();
     await setPage(a, "achievements");
     assert.match(await a.locator("#main-content").innerText(), /同频的一天/);
+    assert.equal(
+      await a
+        .locator('.badge[data-id="first_checkin"] > .milestone-icon.milestone-step')
+        .count(),
+      1,
+    );
+    assert.equal(
+      await a.locator('.badge[data-id="streak_7"] .milestone-routine.locked').count(),
+      1,
+    );
+    assert.equal(await a.locator(".team-milestone:not(.locked)").count(), 1);
     state = await snapshot(emails[0], team);
     assert.equal(state.gems, 3);
     assert.equal(state.team_awards.length, 1);
@@ -361,6 +379,11 @@ async function snapshot(email, space = null) {
     );
     await a.locator("#font-select").selectOption("15");
     await a.locator("#theme-select").selectOption("light");
+    await a.locator("#dynamic-companion").uncheck();
+    await setPage(a, "home");
+    await a.locator('[data-today-state="default"]').waitFor();
+    await setPage(a, "settings");
+    await a.locator("#dynamic-companion").check();
     await setPage(a, "home");
     await a.screenshot({
       path: process.env.V2_SCREENSHOT_DIR

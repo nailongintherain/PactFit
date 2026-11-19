@@ -40,6 +40,52 @@
   const number = (v) =>
     v === null || v === undefined ? "—" : Number(v).toFixed(1);
   const art = `<div class="leaf-art" aria-hidden="true"><svg viewBox="0 0 160 120" fill="none"><path d="M79 108V38" stroke="#728966" stroke-width="3"/><path d="M78 75C34 83 26 38 34 25c29-1 49 20 44 50Z" fill="#b0c59c"/><path d="M80 59c-6-31 18-48 43-45 7 31-10 46-43 45Z" fill="#7d9f71"/><path d="M80 97c1-30 25-40 49-32-2 28-22 38-49 32Z" fill="#cddbb7"/><path d="M79 76 46 40m35 18 28-29m-29 68 35-22" stroke="#5c7f52" stroke-width="1.5"/><ellipse cx="80" cy="110" rx="38" ry="4" fill="#dce6d0"/></svg></div>`;
+  const companionLabels = {
+    default: "默认伙伴图标",
+    waiting: "今天还没有记录",
+    recorded: "今天的记录已保存",
+    together: "我和搭子今天都已记录",
+  };
+  function companion(state = "default", size = "") {
+    const waiting = state === "waiting",
+      recorded = state === "recorded",
+      together = state === "together";
+    return `<span class="companion ${size}" data-companion-state="${state}" role="img" aria-label="${companionLabels[state]}"><svg viewBox="0 0 120 120" aria-hidden="true"><path class="companion-body" d="M31 17C42 9 78 9 89 17c8 6 10 20 12 35l7 43c2 12-8 18-20 16l-18-3c-6-1-14-1-20 0l-18 3c-12 2-22-4-20-16l7-43c2-15 4-29 12-35Z"/><path class="companion-dial" d="M28 49c2-20 14-30 32-30s30 10 32 30H28Z"/><path class="companion-tick" d="M60 25v8M40 30l6 6M80 30l-6 6"/><path class="companion-needle" d="M60 47 56 35l4-10 4 10-4 12Z" transform="${waiting ? "rotate(-32 60 47)" : ""}"/><path class="companion-foot" d="M27 82c12-9 54-9 66 0 5 4 4 14-3 17-18 7-42 7-60 0-7-3-8-13-3-17Z"/>${waiting ? '<path class="companion-face" d="M40 68h10M70 68h10"/>' : '<circle class="companion-eye" cx="45" cy="68" r="3.5"/><circle class="companion-eye" cx="75" cy="68" r="3.5"/>'}${recorded ? '<circle class="companion-status" cx="60" cy="89" r="5"/>' : ""}${together ? '<path class="companion-smile" d="M47 87c7 8 19 8 26 0"/><circle class="companion-status" cx="45" cy="87" r="4"/><circle class="companion-status" cx="75" cy="87" r="4"/>' : ""}</svg></span>`;
+  }
+  function dynamicCompanion() {
+    try {
+      return localStorage.getItem("pactfit_v2_dynamic_companion") !== "static";
+    } catch (_) {
+      return true;
+    }
+  }
+  function companionState(d = st.data) {
+    if (!d || !dynamicCompanion()) return "default";
+    if (!M.today(d).checkin) return "waiting";
+    if (
+      d.space.kind === "team" &&
+      d.members.some((m) => m.user_id !== d.me.user_id && m.checked_today)
+    )
+      return "together";
+    return "recorded";
+  }
+  function milestoneIcon(kind, achieved = true, size = "") {
+    const cls = `milestone-icon milestone-${kind} ${achieved ? "achieved" : "locked"} ${size}`;
+    if (kind === "step")
+      return `<span class="${cls}" aria-hidden="true"><svg viewBox="0 0 80 80"><path class="milestone-step-shape" d="M50 13c10 7 8 19 2 28L38 59 22 48l10-21c5-11 10-19 18-14Z"/><path class="milestone-accent" d="m22 48 16 11-6 9c-4 5-12 4-17 0-5-4-6-10-3-15l10-5Z"/></svg></span>`;
+    if (kind === "routine")
+      return `<span class="${cls}" aria-hidden="true"><svg viewBox="0 0 80 80"><path class="milestone-line" d="M15 29h50"/><path class="milestone-towel-back" d="M28 23h23c6 0 10 4 10 10v30H24l4-40Z"/><path class="milestone-towel" d="M34 21h22c5 0 7 3 7 8v34H29l5-42Z"/><path class="milestone-fold" d="M52 21v14h11"/><path class="milestone-hem" d="M30 55h33"/></svg></span>`;
+    if (kind === "together")
+      return `<span class="${cls}" aria-hidden="true"><svg viewBox="0 0 80 80"><path class="milestone-ribbon-a" d="M10 54 30 32l14 12-20 22-14-12Z"/><path class="milestone-ribbon-b" d="m38 38 18-23 14 11-19 24-13-12Z"/><path class="milestone-knot" d="M23 29c7-7 14-7 21 0l9 9c5 5 3 14-3 18-5 3-10 2-14-2L23 42c-4-4-4-9 0-13Zm34 22c-7 7-14 7-21 0l-9-9c-5-5-3-14 3-18 5-3 10-2 14 2l13 12c4 4 4 9 0 13Z"/></svg></span>`;
+    return `<span class="${cls}" aria-hidden="true">${icon("spark", 28)}</span>`;
+  }
+  function awardKind(award) {
+    const code = typeof award === "string" ? award : award?.code;
+    if (code === "first_checkin") return "step";
+    if (code === "streak_7") return "routine";
+    if (code === "team_together") return "together";
+    return "other";
+  }
   let api, toastTimer;
   const st = {
     data: null,
@@ -110,7 +156,7 @@
       reset: "设置你的新密码",
     };
     $("#app").innerHTML =
-      `<div class="auth-layout"><section class="auth-story"><div class="row"><span class="brand-mark">p.</span><span class="brand">PactFit</span></div><h1>一起把日子<br>过轻一点。</h1><p>记录每一个小小的坚持，<br>也为同行的人，留一份鼓励。</p><div class="auth-art">${art}</div><p style="margin-top:30px">V2.0 Preview · 独立预览环境</p></section><section class="auth"><form id="auth-form"><span class="tag">${api ? "真实账号 · 独立数据服务" : "环境未就绪"}</span><h1 style="margin-top:20px">${titles[mode]}</h1><p>${mode === "recover" ? "输入账号邮箱，我们会发送设置密码链接。" : mode === "reset" ? "设置后可直接使用邮箱和密码登录。" : "从你的私人空间开始，也可以邀请搭子一起出发。"}</p>${mode !== "reset" ? '<label for="auth-email">邮箱地址</label><input id="auth-email" type="email" autocomplete="email" required placeholder="you@example.com">' : ""}${mode !== "recover" ? `<label for="auth-password">密码</label><input id="auth-password" type="password" ${mode === "signup" || mode === "reset" ? 'minlength="8"' : ""} maxlength="128" autocomplete="${mode === "signin" ? "current-password" : "new-password"}" required placeholder="${mode === "signin" ? "输入你的密码" : "至少 8 位"}">` : ""}<div class="error-text" id="auth-error" role="alert">${e(message)}</div><button class="btn" type="submit" ${api ? "" : "disabled"}>${{ signin: "登录", signup: "创建账号", recover: "发送设置密码邮件", reset: "保存新密码" }[mode]} ${icon("arrow")}</button><div class="auth-links"><button type="button" class="text-btn" data-action="auth-mode" data-mode="${mode === "signin" ? "signup" : "signin"}">${mode === "signin" ? "还没有账号？注册" : "返回登录"}</button>${mode === "signin" ? '<button type="button" class="text-btn" data-action="auth-mode" data-mode="recover">忘记密码？</button>' : ""}</div><p style="margin-top:28px;font-size:.72rem">手机号与第三方登录未接入。登录凭据不写入本地存储。</p></form></section></div>`;
+      `<div class="auth-layout"><section class="auth-story"><div class="row">${companion("default", "brand-companion")}<span class="brand">PactFit</span></div><h1>一起把日子<br>过轻一点。</h1><p>记录每一个小小的坚持，<br>也为同行的人，留一份鼓励。</p><div class="auth-art">${art}</div><p style="margin-top:30px">V2.0 Preview · 独立预览环境</p></section><section class="auth"><form id="auth-form"><span class="tag">${api ? "真实账号 · 独立数据服务" : "环境未就绪"}</span><h1 style="margin-top:20px">${titles[mode]}</h1><p>${mode === "recover" ? "输入账号邮箱，我们会发送设置密码链接。" : mode === "reset" ? "设置后可直接使用邮箱和密码登录。" : "从你的私人空间开始，也可以邀请搭子一起出发。"}</p>${mode !== "reset" ? '<label for="auth-email">邮箱地址</label><input id="auth-email" type="email" autocomplete="email" required placeholder="you@example.com">' : ""}${mode !== "recover" ? `<label for="auth-password">密码</label><input id="auth-password" type="password" ${mode === "signup" || mode === "reset" ? 'minlength="8"' : ""} maxlength="128" autocomplete="${mode === "signin" ? "current-password" : "new-password"}" required placeholder="${mode === "signin" ? "输入你的密码" : "至少 8 位"}">` : ""}<div class="error-text" id="auth-error" role="alert">${e(message)}</div><button class="btn" type="submit" ${api ? "" : "disabled"}>${{ signin: "登录", signup: "创建账号", recover: "发送设置密码邮件", reset: "保存新密码" }[mode]} ${icon("arrow")}</button><div class="auth-links"><button type="button" class="text-btn" data-action="auth-mode" data-mode="${mode === "signin" ? "signup" : "signin"}">${mode === "signin" ? "还没有账号？注册" : "返回登录"}</button>${mode === "signin" ? '<button type="button" class="text-btn" data-action="auth-mode" data-mode="recover">忘记密码？</button>' : ""}</div><p style="margin-top:28px;font-size:.72rem">手机号与第三方登录未接入。登录凭据不写入本地存储。</p></form></section></div>`;
   }
   function sidebar() {
     const d = st.data;
@@ -118,7 +164,7 @@
     const teamSpaces = d.spaces.filter((s) => s.kind === "team");
     const spaceRow = (s) =>
       `<div class="space-row ${s.id === d.space.id ? "active" : ""}"><button class="space-select" data-action="switch-space" data-id="${s.id}" title="${e(s.name)}">${avatar(s, "sm")}<span class="truncate sidebar-text">${e(s.name)}</span></button>${s.kind === "team" ? `<button class="icon-btn" data-action="expand-space" data-id="${s.id}" aria-label="展开 ${e(s.name)} 的成员" aria-expanded="${st.expanded.has(s.id)}">${icon("chevron", 14)}</button><button class="icon-btn" data-action="space-details" data-id="${s.id}" aria-label="${e(s.name)} 详情">${icon("more", 16)}</button>` : ""}</div>${st.expanded.has(s.id) ? `<div class="sidebar-members">${s.members.map((m) => `<div class="row">${avatar(m, "sm")}<span class="small truncate">${e(m.nickname)}${m.captain ? " · 队长" : ""}</span></div>`).join("")}</div>` : ""}`;
-    return `<div class="sidebar-brand row"><div class="row"><span class="brand-mark">p.</span><span class="brand">PactFit</span></div><button class="icon-btn" data-action="close-sidebar" aria-label="关闭侧边栏">${icon("close", 16)}</button></div><button class="row profile-block" data-action="profile">${avatar(d.me)}<span class="grow" style="text-align:left"><b class="truncate" style="display:block">${e(d.me.nickname)}</b><small>${e(d.me.public_id)}</small></span></button><div class="stack" style="gap:9px"><button class="btn full" data-action="create-space">${icon("plus")}<span class="sidebar-text">创建新空间</span></button><button class="btn ghost full" data-action="join-space">${icon("users")}<span class="sidebar-text">输入空间口令</span></button></div><div><div class="sidebar-label">只属于你 · PRIVATE</div>${d.spaces
+    return `<div class="sidebar-brand row"><div class="row">${companion(companionState(d), "brand-companion")}<span class="brand">PactFit</span></div><button class="icon-btn" data-action="close-sidebar" aria-label="关闭侧边栏">${icon("close", 16)}</button></div><button class="row profile-block" data-action="profile">${avatar(d.me)}<span class="grow" style="text-align:left"><b class="truncate" style="display:block">${e(d.me.nickname)}</b><small>${e(d.me.public_id)}</small></span></button><div class="stack" style="gap:9px"><button class="btn full" data-action="create-space">${icon("plus")}<span class="sidebar-text">创建新空间</span></button><button class="btn ghost full" data-action="join-space">${icon("users")}<span class="sidebar-text">输入空间口令</span></button></div><div><div class="sidebar-label">只属于你 · PRIVATE</div>${d.spaces
       .filter((s) => s.kind === "private")
       .map(spaceRow)
       .join(
@@ -174,9 +220,11 @@
       today = M.today(d),
       trend = M.trend(d),
       team = d.space.kind === "team";
+    const buddy = companionState(d),
+      buddyArt = companion(buddy, "hero-companion");
     const hero = team
-      ? `<section class="card hero"><div class="row between"><span class="eyebrow">TODAY, TOGETHER</span><span class="tag">${e(d.today)}</span></div><h2>今天，也一起迈出一小步</h2><p class="saved-hint">不必每天都掉秤，出现本身就值得鼓励。</p><div class="weight-value">${d.members.filter((m) => m.checked_today).length}<em>/ ${d.members.length} 人已打卡</em></div><div class="row wrap">${d.members.map((m) => `<button data-action="member" data-id="${m.user_id}" aria-label="查看 ${e(m.nickname)}">${avatar(m, "", m.checked_today)}</button>`).join("")}</div></section>`
-      : `<section class="card hero"><div class="row between"><span class="eyebrow">A LITTLE EVERY DAY</span><span class="tag">${today.checkin ? icon("check", 13) + " 今日已打卡" : "今天还未打卡"}</span></div><h2>${today.checkin ? "今天的坚持，已经记下了。" : "给今天，留一个小小的记录。"}</h2><div class="weight-value">${today.health?.weight != null ? number(today.health.weight) : "—"}<em>kg · 今日体重</em></div><p class="saved-hint">${today.checkin ? "已保存到你的私人记录 · " + e(d.today) : "体重可以不填，心情与坚持也值得记录。"}</p></section>`;
+      ? `<section class="card hero" data-today-state="${buddy}"><div class="row between"><span class="eyebrow">TODAY, TOGETHER</span><span class="tag">${e(d.today)}</span></div><h2>今天，也一起迈出一小步</h2><p class="saved-hint">不必每天都掉秤，出现本身就值得鼓励。</p><div class="hero-status"><div class="weight-value">${d.members.filter((m) => m.checked_today).length}<em>/ ${d.members.length} 人已打卡</em></div>${buddyArt}</div><div class="row wrap">${d.members.map((m) => `<button data-action="member" data-id="${m.user_id}" aria-label="查看 ${e(m.nickname)}">${avatar(m, "", m.checked_today)}</button>`).join("")}</div></section>`
+      : `<section class="card hero" data-today-state="${buddy}"><div class="row between"><span class="eyebrow">A LITTLE EVERY DAY</span><span class="tag">${today.checkin ? icon("check", 13) + " 今日已打卡" : "今天还未打卡"}</span></div><h2>${today.checkin ? "今天的坚持，已经记下了。" : "给今天，留一个小小的记录。"}</h2><div class="hero-status"><div class="weight-value">${today.health?.weight != null ? number(today.health.weight) : "—"}<em>kg · 今日体重</em></div>${buddyArt}</div><p class="saved-hint">${today.checkin ? "已保存到你的私人记录 · " + e(d.today) : "体重可以不填，心情与坚持也值得记录。"}</p></section>`;
     return (
       head(
         "YOUR DAILY SPACE",
@@ -247,7 +295,7 @@
   }
   function timeline(items) {
     return items.length
-      ? `<div class="timeline">${items.map((a) => `<div class="timeline-item"><small>${e((a.created_at || "").slice(0, 10))}</small><button class="text-btn" data-action="award-detail" data-id="${a.id || a.code}">${e(a.title)}</button></div>`).join("")}</div>`
+      ? `<div class="timeline">${items.map((a) => `<div class="timeline-item">${milestoneIcon(awardKind(a), true, "mini")}<div><small>${e((a.created_at || "").slice(0, 10))}</small><button class="text-btn" data-action="award-detail" data-id="${a.id || a.code}">${e(a.title)}</button></div></div>`).join("")}</div>`
       : empty("每一次坚持，都在为下一个里程碑铺路。");
   }
   function trendView() {
@@ -320,21 +368,25 @@
       d.awards.filter((a) => !a.space_id).map((a) => a.code),
     );
     const personal = [
-      ["first_checkin", "迈出第一步", "完成第一次打卡", "🌱"],
-      ["streak_7", "连续七天", "连续记录七天", "☀️"],
+      ["first_checkin", "迈出第一步", "完成第一次打卡", "step"],
+      ["streak_7", "连续七天", "连续记录七天", "routine"],
     ];
+    const together =
+        d.team_awards.find((a) => a.code === "team_together") ||
+        d.team_awards[0],
+      teamActive = d.space.kind === "team";
     return (
       head(
         "EVERY EFFORT COUNTS",
         "每个坚持，都闪闪发光",
         "成就属于你，宝石也是。离开团队不会失去已获得的荣誉。",
       ) +
-      `<div class="home-grid"><div class="stack"><section class="card"><div class="card-title"><h2>个人成就</h2><small>${owned.size} 项已解锁</small></div><div class="badge-grid">${personal.map(([code, title, sub, ico]) => `<button class="badge ${owned.has(code) ? "" : "locked"}" data-action="award-detail" data-id="${code}"><span class="medal">${ico}</span><b>${title}</b><small>${owned.has(code) ? "已解锁" : sub}</small></button>`).join("")}</div></section><section class="card"><div class="card-title"><h2>团队成就</h2><small>当前团队</small></div>${d.space.kind === "private" ? empty("进入一个团队，查看共同的成就。") : d.team_awards.length ? d.team_awards.map((a) => `<div class="row member-row"><span class="avatar">🤝</span><div><b>${e(a.title)}</b><small style="display:block">${e(a.created_at.slice(0, 10))} · 首次全员打卡</small></div></div>`).join("") : empty("至少两位成员在同一天全部打卡，解锁「同频的一天」。")}</section><section class="card"><div class="card-title"><h2>我的历史荣誉墙</h2></div>${
+      `<div class="home-grid"><div class="stack"><section class="card"><div class="card-title"><h2>个人成就</h2><small>${owned.size} 项已解锁</small></div><div class="badge-grid">${personal.map(([code, title, sub, kind]) => `<button class="badge ${owned.has(code) ? "" : "locked"}" data-action="award-detail" data-id="${code}">${milestoneIcon(kind, owned.has(code))}<b>${title}</b><small>${owned.has(code) ? "已解锁" : sub}</small></button>`).join("")}</div></section><section class="card"><div class="card-title"><h2>团队成就</h2><small>${teamActive ? "当前团队" : "尚未进入团队"}</small></div><button class="team-milestone ${together ? "" : "locked"}" data-action="award-detail" data-id="${together?.id || "team_together"}" ${teamActive ? "" : "disabled"}>${milestoneIcon("together", Boolean(together), "team")}<span><b>${together ? e(together.title) : "同频的一天"}</b><small>${together ? e(together.created_at.slice(0, 10)) + " · 首次全员打卡" : teamActive ? "至少两位成员在同一天全部打卡" : "进入团队后可共同解锁"}</small></span></button></section><section class="card"><div class="card-title"><h2>我的历史荣誉墙</h2></div>${
         d.awards
           .filter((a) => a.space_id)
           .map(
             (a) =>
-              `<div class="row member-row"><span class="avatar">🏅</span><div><b>${e(a.title)}</b><small style="display:block">${e(a.team_name)} · ${e(a.created_at.slice(0, 10))}</small></div></div>`,
+              `<div class="row member-row">${milestoneIcon(awardKind(a), true, "mini")}<div><b>${e(a.title)}</b><small style="display:block">${e(a.team_name)} · ${e(a.created_at.slice(0, 10))}</small></div></div>`,
           )
           .join("") || empty("曾经同行的光，会一直留在这里。")
       }</section><section class="card"><div class="card-title"><h2>任务与奖励</h2></div>${d.reward_rules.map((r) => `<div class="ledger-row"><span>${e(r.label)}</span><b>+${r.gems} ◇</b></div>`).join("")}<p class="small muted" style="margin-top:14px">Preview 测试积分规则，可配置。重复编辑、跨团队打卡或反复输入体重不会重复领取同一奖励。</p></section></div><div class="stack"><section class="card gem-card"><div class="row between"><h2>我的宝石</h2>${icon("gem", 25)}</div><div class="weight-value">${d.gems}<em>◇</em></div><p class="small muted">来自独立服务端流水 · Preview 测试积分</p><button class="text-btn" data-action="ledger" style="margin-top:16px">查看宝石明细 ${icon("arrow", 14)}</button></section><section class="card"><div class="card-title"><h2>宝石商店</h2><span class="tag warm">Preview</span></div>${d.catalog.map((c) => `<div class="shop-item"><span class="shop-ico">${icon(c.kind === "decoration" ? "spark" : "users", 25)}</span><div class="grow"><h3>${e(c.title)}</h3><p class="small muted">${e(c.description)}</p><div style="margin-top:10px">${c.enabled && c.price != null && c.max_quantity != null ? `<button class="btn secondary sm" data-action="purchase" data-product="${c.code}">${c.price} ◇ · 兑换</button>` : '<button class="btn ghost sm" disabled>价格／上限待确认</button>'}</div></div></div>`).join("")}</section></div></div>`
@@ -387,7 +439,8 @@
   function settingsView() {
     const d = st.data;
     const theme = localStorage.getItem("pactfit_v2_theme") || "system",
-      font = localStorage.getItem("pactfit_v2_font") || "15";
+      font = localStorage.getItem("pactfit_v2_font") || "15",
+      movingCompanion = dynamicCompanion();
     return (
       head("MAKE IT YOURS", "设置与隐私", "用你舒服的方式，继续这段旅程。") +
       `<div class="grid"><div class="stack"><section class="card"><div class="row">${avatar(d.me, "lg")}<div class="grow"><h2>${e(d.me.nickname)}</h2><small>${e(d.me.public_id)}</small></div><button class="text-btn" data-action="profile">编辑</button></div><div class="separator"></div><div class="row between"><small>个人 ID · 不可修改</small>${btn(icon("copy", 14) + " 复制", "copy-id", "", "ghost sm")}</div><p class="small muted" style="margin-top:13px">昵称可以重复。最近 7 天还可修改 ${d.nickname_changes_remaining} 次。头像与昵称同步至所有空间。</p></section><section class="card"><h2>账号与安全</h2><div class="settings-row"><span class="small truncate">${e(api.email())}</span><button class="text-btn" data-action="change-email">更换邮箱</button></div><div class="settings-row"><span class="small">登录密码</span><button class="text-btn" data-action="change-password">修改密码</button></div><div class="settings-row"><div><span class="small">注销账号</span><small style="display:block">需要身份管理服务端，Preview 尚未接入</small></div><button class="text-btn" disabled>暂不可用</button></div><button class="btn ghost full" data-action="logout" style="margin-top:18px">${icon("logout")} 退出登录</button></section><section class="card"><h2>隐私与数据</h2><div class="settings-row"><span class="small">当前团队的共享授权</span>${d.space.kind === "team" ? '<button class="text-btn" data-action="privacy">管理</button>' : "<small>私人空间不向他人共享</small>"}</div><p class="small muted" style="margin-top:15px">你的体重和目标只有得到此团队单独授权才可见。撤销后，服务端停止返回受限数据。</p><button class="text-btn" data-action="erase-health" style="margin-top:16px;color:var(--danger)">删除我的个人健康记录</button>${d.past_spaces.length ? '<div class="separator"></div><h3>历史团队数据</h3>' + d.past_spaces.map((s) => `<div class="settings-row"><span class="small">${e(s.name)} · ${s.archived ? "已解散" : "已退出"}</span><button class="text-btn" data-action="erase-history" data-id="${s.id}">删除我的打卡历史</button></div>`).join("") : ""}</section></div><div class="stack"><section class="card"><h2>外观与阅读</h2><label class="settings-row"><span class="small">显示主题</span><select id="theme-select" aria-label="显示主题">${[
@@ -412,7 +465,7 @@
         )
         .join(
           "",
-        )}</select></label></section><section class="card"><h2>通知与动态</h2><form id="preferences-form"><label class="settings-row"><span class="small">接收搭子鼓励提醒</span><input class="switch" type="checkbox" name="encouragement" ${d.me.preferences.encouragement ? "checked" : ""}></label><label class="settings-row"><span class="small">成就与宝石通知</span><input class="switch" type="checkbox" name="achievements" ${d.me.preferences.achievements ? "checked" : ""}></label><label class="settings-row"><span class="small">向共同成员公开个人成就动态</span><input class="switch" type="checkbox" name="share_activity" ${d.me.share_activity ? "checked" : ""}></label><small style="display:block;margin-top:14px">不公开体重数字。重要系统通知始终保留。</small><button class="btn secondary sm" style="margin-top:17px">保存偏好</button></form></section><section class="card">${art}<h2>关于 PactFit</h2><p class="small muted" style="margin:12px 0">一起把日子过轻一点。<br>V2.0 Preview · 独立分支 · 真实数据服务</p><p class="small muted">宝石使用可配置的 Preview 测试奖励。商店价格与上限未确认的商品不开放兑换。</p><a class="text-btn" href="https://github.com/nailongintherain/PactFit/issues" target="_blank" rel="noopener noreferrer">意见反馈与问题记录 ↗</a></section></div></div>`
+        )}</select></label><label class="settings-row"><span><span class="small">伙伴图标随今日状态变化</span><small style="display:block">仅改变应用内图标；关闭后保持默认表情</small></span><input class="switch" id="dynamic-companion" type="checkbox" ${movingCompanion ? "checked" : ""}></label></section><section class="card"><h2>通知与动态</h2><form id="preferences-form"><label class="settings-row"><span class="small">接收搭子鼓励提醒</span><input class="switch" type="checkbox" name="encouragement" ${d.me.preferences.encouragement ? "checked" : ""}></label><label class="settings-row"><span class="small">成就与宝石通知</span><input class="switch" type="checkbox" name="achievements" ${d.me.preferences.achievements ? "checked" : ""}></label><label class="settings-row"><span class="small">向共同成员公开个人成就动态</span><input class="switch" type="checkbox" name="share_activity" ${d.me.share_activity ? "checked" : ""}></label><small style="display:block;margin-top:14px">不公开体重数字。重要系统通知始终保留。</small><button class="btn secondary sm" style="margin-top:17px">保存偏好</button></form></section><section class="card">${art}<h2>关于 PactFit</h2><p class="small muted" style="margin:12px 0">一起把日子过轻一点。<br>V2.0 Preview · 独立分支 · 真实数据服务</p><p class="small muted">宝石使用可配置的 Preview 测试奖励。商店价格与上限未确认的商品不开放兑换。</p><a class="text-btn" href="https://github.com/nailongintherain/PactFit/issues" target="_blank" rel="noopener noreferrer">意见反馈与问题记录 ↗</a></section></div></div>`
     );
   }
   const field = (label, name, type = "text", value = "", extra = "") =>
@@ -487,10 +540,10 @@
     if (name === "award-detail") {
       const award =
         d.awards.find((a) => a.id === data.id || a.code === data.id) ||
-        d.team_awards.find((a) => a.code === data.id);
+        d.team_awards.find((a) => a.id === data.id || a.code === data.id);
       return award
-        ? `<div style="text-align:center;padding:25px 10px"><span style="font-size:3rem">🏅</span><h2 style="margin:15px 0">${e(award.title)}</h2><p class="small muted">${e(award.created_at.slice(0, 10))}${award.team_name ? " · " + e(award.team_name) : ""}</p><p class="notice" style="margin-top:20px">荣誉已保存到个人账号，不随退出或解散团队而收回。</p></div>`
-        : `<p class="notice">${data.id === "streak_7" ? "连续完成 7 天个人打卡即可解锁，不要求填写或降低体重。" : "完成首次打卡即可解锁，体重可以留空。"}</p>`;
+        ? `<div class="award-detail">${milestoneIcon(awardKind(award), true, "detail")}<h2>${e(award.title)}</h2><p class="small muted">${e(award.created_at.slice(0, 10))}${award.team_name ? " · " + e(award.team_name) : ""}</p><p class="notice">荣誉已保存到个人账号，不随退出或解散团队而收回。</p></div>`
+        : `<div class="award-detail">${milestoneIcon(awardKind(data.id), false, "detail")}<h2>${data.id === "streak_7" ? "连续七天" : data.id === "team_together" ? "同频的一天" : "迈出第一步"}</h2><p class="notice">${data.id === "streak_7" ? "连续完成 7 天个人打卡即可解锁，不要求填写或降低体重。" : data.id === "team_together" ? "至少两位团队成员在同一天全部打卡即可解锁，不要求公开体重。" : "完成首次打卡即可解锁，体重可以留空。"}</p></div>`;
     }
     if (name === "change-email")
       return `<p class="notice">此操作由认证服务处理，可能需要确认邮件。不要把密码或邮件链接发给他人。</p>${field("新的邮箱地址", "email", "email", "", 'required autocomplete="email"')}`;
@@ -940,6 +993,14 @@
     if (t.id === "font-select") {
       localStorage.setItem("pactfit_v2_font", t.value);
       preferences();
+    }
+    if (t.id === "dynamic-companion") {
+      localStorage.setItem(
+        "pactfit_v2_dynamic_companion",
+        t.checked ? "dynamic" : "static",
+      );
+      shell();
+      toast(t.checked ? "伙伴会跟随今天的记录变化" : "已保持默认伙伴图标");
     }
     if (t.id === "member-code-permission") {
       await run(
