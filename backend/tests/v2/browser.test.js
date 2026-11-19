@@ -37,7 +37,7 @@ async function snapshot(email, space = null) {
   try {
     for (const email of emails) {
       const ctx = await browser.newContext({
-        viewport: { width: 1280, height: 900 },
+        viewport: { width: 390, height: 844 },
       });
       const page = await ctx.newPage();
       page.setDefaultTimeout(15000);
@@ -261,21 +261,40 @@ async function snapshot(email, space = null) {
     await refresh(a);
     await a.locator('[data-today-state="together"]').waitFor();
     await setPage(a, "achievements");
-    assert.match(await a.locator("#main-content").innerText(), /同频的一天/);
+    assert.equal(await a.locator(".achievement-tabs button").count(), 6);
+    assert.equal(await a.locator(".achievement-card").count(), 10);
     assert.equal(
-      await a
-        .locator('.badge[data-id="first_checkin"] > .milestone-icon.milestone-step')
-        .count(),
+      await a.locator('.achievement-card[data-id="first_checkin"].earned').count(),
       1,
     );
+    await action(
+      a,
+      "achievement-category",
+      '[data-category="weight_journey"]',
+    );
+    assert.match(
+      await a.locator('.achievement-card[data-id="weight_up_1"]').innerText(),
+      /隐藏彩蛋|等待偶遇/,
+    );
+    assert.doesNotMatch(
+      await a.locator('.achievement-card[data-id="weight_up_1"]').innerText(),
+      /体重较上一次记录上升/,
+    );
+    await action(
+      a,
+      "achievement-category",
+      '[data-category="buddy_collaboration"]',
+    );
     assert.equal(
-      await a.locator('.badge[data-id="streak_7"] .milestone-routine.locked').count(),
+      await a.locator('.achievement-card[data-id="team_together"].earned').count(),
       1,
     );
-    assert.equal(await a.locator(".team-milestone:not(.locked)").count(), 1);
+    await action(a, "award-detail", '[data-id="team_together"]');
+    assert.match(await a.locator("#modal-root").innerText(), /全员同日打卡/);
+    await action(a, "close-modal");
     state = await snapshot(emails[0], team);
     assert.equal(state.gems, 3);
-    assert.equal(state.team_awards.length, 1);
+    assert.ok(state.team_awards.some((award) => award.code === "team_together"));
     assert.equal(await a.locator('[data-action="purchase"]').count(), 0);
     assert.match(
       await a.locator("#main-content").innerText(),
@@ -313,9 +332,10 @@ async function snapshot(email, space = null) {
     await switchSpace(a, privateA);
     await setPage(a, "home");
     assert.match(await a.locator("#main-content").innerText(), /69.8/);
-    assert.equal(
-      (await snapshot(emails[0])).awards.filter((x) => x.space_id).length,
-      1,
+    assert.ok(
+      (await snapshot(emails[0])).awards.some(
+        (x) => x.space_id && x.code === "team_together",
+      ),
     );
     // Desktop/tablet viewports must retain the same single-column phone UI.
     for (const width of [320, 390, 768, 1440]) {

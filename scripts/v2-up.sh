@@ -28,7 +28,7 @@ for attempt in {1..60}; do
  sleep 1
  if [ "$attempt" = 60 ]; then echo 'V2 Auth did not become ready; inspect docker compose logs' >&2; exit 1; fi
 done
-for migration in db/migrations/0[34]-v2-*.sql; do
+for migration in db/migrations/0[3-5]-v2-*.sql; do
  version="$(basename "$migration" .sql)"
  has_journal=$(cpv2 exec -T db psql -U postgres -d pactfit_v2 -Atc "SELECT to_regclass('public.v2_migrations') IS NOT NULL")
  if [ "$has_journal" = t ]; then

@@ -237,13 +237,23 @@
         return data.data;
       },
       async snapshot(space) {
-        return http(
+        const token = await readyToken();
+        const achievementWall = await http(
+          c.restUrl,
+          "/rpc/v2_achievement_wall",
+          { p_space: space || null },
+          "POST",
+          token,
+        );
+        const data = await http(
           c.restUrl,
           "/rpc/v2_snapshot",
           { p_space: space || null },
           "POST",
-          await readyToken(),
+          token,
         );
+        data.achievement_wall = achievementWall;
+        return data;
       },
     };
   }

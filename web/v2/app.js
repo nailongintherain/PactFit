@@ -86,6 +86,19 @@
     if (code === "team_together") return "together";
     return "other";
   }
+  function achievementIcon(item, size = "") {
+    const kind = item.icon || "mystery";
+    const icons = {
+      journey: "arrow",
+      record: "check",
+      weight: "trend",
+      goal: "spark",
+      buddy: "users",
+      surprise: "spark",
+      mystery: "lock",
+    };
+    return `<span class="achievement-emblem emblem-${kind} ${item.earned ? "earned" : "locked"} ${size}" aria-hidden="true">${icon(icons[kind] || "spark", size === "detail" ? 42 : 27)}</span>`;
+  }
   let api, toastTimer;
   const st = {
     data: null,
@@ -93,6 +106,7 @@
     page: "home",
     range: 30,
     messageTab: "pending",
+    achievementCategory: "start_return",
     expanded: new Set(),
     loading: false,
     error: "",
@@ -363,25 +377,63 @@
     );
   }
   function achievementsView() {
-    const d = st.data;
-    const owned = new Set(
-      d.awards.filter((a) => !a.space_id).map((a) => a.code),
-    );
-    const personal = [
-      ["first_checkin", "迈出第一步", "完成第一次打卡", "step"],
-      ["streak_7", "连续七天", "连续记录七天", "routine"],
+    const d = st.data,
+      wall = d.achievement_wall || { total: 0, earned: 0, items: [] };
+    const categoryOrder = [
+      "start_return",
+      "record_streak",
+      "weight_journey",
+      "goals_promises",
+      "buddy_collaboration",
+      "surprises",
     ];
-    const together =
-        d.team_awards.find((a) => a.code === "team_together") ||
-        d.team_awards[0],
-      teamActive = d.space.kind === "team";
+    const categoryCopy = {
+      start_return: "开始、加入与重新回来，都值得有一个起点。",
+      record_streak: "累计与连续是两条不同的坚持轨迹。",
+      weight_journey: "记录变化，不把正常波动写成失败。",
+      goals_promises: "个人目标与共同小事，都由真实行动触发。",
+      buddy_collaboration: "一起出现、鼓励与完成，让同行被看见。",
+      surprises: "罕见组合会悄悄揭晓，未解锁前不剧透。",
+    };
+    const category = wall.items.some(
+      (item) => item.category === st.achievementCategory,
+    )
+      ? st.achievementCategory
+      : categoryOrder[0];
+    const items = wall.items.filter((item) => item.category === category),
+      categoryTitle = items[0]?.category_title || "成就",
+      categoryEarned = items.filter((item) => item.earned).length;
+    const tabs = `<div class="achievement-tabs" role="tablist" aria-label="成就类别">${categoryOrder
+      .map((id) => {
+        const group = wall.items.filter((item) => item.category === id),
+          title = group[0]?.category_title || id,
+          earned = group.filter((item) => item.earned).length;
+        return `<button role="tab" aria-selected="${id === category}" class="${id === category ? "active" : ""}" data-action="achievement-category" data-category="${id}"><span>${e(title)}</span><small>${earned} / ${group.length}</small></button>`;
+      })
+      .join("")}</div>`;
+    const cards = items
+      .map((item) => {
+        const status = item.earned
+          ? "已解锁"
+          : !item.available
+            ? "进入团队查看"
+            : item.progress == null
+              ? "等待偶遇"
+              : `${item.progress} / ${item.threshold}`;
+        const progress =
+          !item.earned && item.progress != null && item.threshold
+            ? `<span class="achievement-progress"><i style="width:${Math.min(100, (item.progress / item.threshold) * 100)}%"></i></span>`
+            : "";
+        return `<button class="achievement-card ${item.earned ? "earned" : "locked"} ${item.available ? "" : "unavailable"}" data-action="award-detail" data-id="${e(item.code)}">${achievementIcon(item)}<span class="achievement-meta"><span>${item.ownership === "team" ? "团队" : "个人"}</span><span>${item.reveal === "hidden" ? "彩蛋" : item.tone === "reverse_playful" ? "趣味" : "正向"}</span></span><b>${e(item.title)}</b><small>${e(status)}</small>${progress}</button>`;
+      })
+      .join("");
     return (
       head(
         "EVERY EFFORT COUNTS",
-        "每个坚持，都闪闪发光",
-        "成就属于你，宝石也是。离开团队不会失去已获得的荣誉。",
+        "六条路，每一步都有名字",
+        "按触发行为分类；归属、风格和揭晓方式作为每项成就的属性。",
       ) +
-      `<div class="home-grid"><div class="stack"><section class="card"><div class="card-title"><h2>个人成就</h2><small>${owned.size} 项已解锁</small></div><div class="badge-grid">${personal.map(([code, title, sub, kind]) => `<button class="badge ${owned.has(code) ? "" : "locked"}" data-action="award-detail" data-id="${code}">${milestoneIcon(kind, owned.has(code))}<b>${title}</b><small>${owned.has(code) ? "已解锁" : sub}</small></button>`).join("")}</div></section><section class="card"><div class="card-title"><h2>团队成就</h2><small>${teamActive ? "当前团队" : "尚未进入团队"}</small></div><button class="team-milestone ${together ? "" : "locked"}" data-action="award-detail" data-id="${together?.id || "team_together"}" ${teamActive ? "" : "disabled"}>${milestoneIcon("together", Boolean(together), "team")}<span><b>${together ? e(together.title) : "同频的一天"}</b><small>${together ? e(together.created_at.slice(0, 10)) + " · 首次全员打卡" : teamActive ? "至少两位成员在同一天全部打卡" : "进入团队后可共同解锁"}</small></span></button></section><section class="card"><div class="card-title"><h2>我的历史荣誉墙</h2></div>${
+      `<section class="achievement-summary"><div><small>已解锁</small><b>${wall.earned}<em>/ ${wall.total}</em></b></div><div class="grow"><span class="achievement-progress"><i style="width:${wall.total ? Math.min(100, (wall.earned / wall.total) * 100) : 0}%"></i></span><small>隐藏彩蛋只在触发后揭晓；团队进度跟随当前空间。</small></div></section>${tabs}<div class="home-grid"><div class="stack"><section class="card achievement-section"><div class="card-title"><div><h2>${e(categoryTitle)}</h2><small>${e(categoryCopy[category])}</small></div><span class="tag warm">${categoryEarned} / ${items.length}</span></div><div class="achievement-grid">${cards}</div></section><section class="card"><div class="card-title"><h2>我的历史荣誉墙</h2></div>${
         d.awards
           .filter((a) => a.space_id)
           .map(
@@ -389,7 +441,7 @@
               `<div class="row member-row">${milestoneIcon(awardKind(a), true, "mini")}<div><b>${e(a.title)}</b><small style="display:block">${e(a.team_name)} · ${e(a.created_at.slice(0, 10))}</small></div></div>`,
           )
           .join("") || empty("曾经同行的光，会一直留在这里。")
-      }</section><section class="card"><div class="card-title"><h2>任务与奖励</h2></div>${d.reward_rules.map((r) => `<div class="ledger-row"><span>${e(r.label)}</span><b>+${r.gems} ◇</b></div>`).join("")}<p class="small muted" style="margin-top:14px">Preview 测试积分规则，可配置。重复编辑、跨团队打卡或反复输入体重不会重复领取同一奖励。</p></section></div><div class="stack"><section class="card gem-card"><div class="row between"><h2>我的宝石</h2>${icon("gem", 25)}</div><div class="weight-value">${d.gems}<em>◇</em></div><p class="small muted">来自独立服务端流水 · Preview 测试积分</p><button class="text-btn" data-action="ledger" style="margin-top:16px">查看宝石明细 ${icon("arrow", 14)}</button></section><section class="card"><div class="card-title"><h2>宝石商店</h2><span class="tag warm">Preview</span></div>${d.catalog.map((c) => `<div class="shop-item"><span class="shop-ico">${icon(c.kind === "decoration" ? "spark" : "users", 25)}</span><div class="grow"><h3>${e(c.title)}</h3><p class="small muted">${e(c.description)}</p><div style="margin-top:10px">${c.enabled && c.price != null && c.max_quantity != null ? `<button class="btn secondary sm" data-action="purchase" data-product="${c.code}">${c.price} ◇ · 兑换</button>` : '<button class="btn ghost sm" disabled>价格／上限待确认</button>'}</div></div></div>`).join("")}</section></div></div>`
+      }</section><section class="card"><div class="card-title"><h2>已批准的测试奖励</h2></div>${d.reward_rules.map((r) => `<div class="ledger-row"><span>${e(r.label)}</span><b>+${r.gems} ◇</b></div>`).join("")}<p class="small muted" style="margin-top:14px">新增成就默认只授予徽章，不自动增加宝石；避免在运营规则确认前扩大积分发放。</p></section></div><div class="stack"><section class="card gem-card"><div class="row between"><h2>我的宝石</h2>${icon("gem", 25)}</div><div class="weight-value">${d.gems}<em>◇</em></div><p class="small muted">来自独立服务端流水 · Preview 测试积分</p><button class="text-btn" data-action="ledger" style="margin-top:16px">查看宝石明细 ${icon("arrow", 14)}</button></section><section class="card"><div class="card-title"><h2>宝石商店</h2><span class="tag warm">Preview</span></div>${d.catalog.map((c) => `<div class="shop-item"><span class="shop-ico">${icon(c.kind === "decoration" ? "spark" : "users", 25)}</span><div class="grow"><h3>${e(c.title)}</h3><p class="small muted">${e(c.description)}</p><div style="margin-top:10px">${c.enabled && c.price != null && c.max_quantity != null ? `<button class="btn secondary sm" data-action="purchase" data-product="${c.code}">${c.price} ◇ · 兑换</button>` : '<button class="btn ghost sm" disabled>价格／上限待确认</button>'}</div></div></div>`).join("")}</section></div></div>`
     );
   }
   function messagesView() {
@@ -538,9 +590,22 @@
     if (name === "ledger")
       return `<p class="notice">宝石来自服务端独立流水。以下为最近 100 笔，Preview 积分不代表正式运营规则。</p>${d.ledger.map((l) => `<div class="ledger-row"><span>${e({ daily_checkin: "每日打卡", first_checkin: "首次打卡", streak_7: "连续七天", team_together: "团队成就" }[l.reason] || l.reason)}<small style="display:block">${e(l.created_at.slice(0, 10))}</small></span><b class="${l.amount > 0 ? "positive" : ""}">${l.amount > 0 ? "+" : ""}${l.amount} ◇</b></div>`).join("") || empty("还没有宝石流水。")}`;
     if (name === "award-detail") {
+      const catalog = d.achievement_wall?.items?.find(
+        (item) => item.code === data.id,
+      );
       const award =
         d.awards.find((a) => a.id === data.id || a.code === data.id) ||
         d.team_awards.find((a) => a.id === data.id || a.code === data.id);
+      if (catalog) {
+        const status = catalog.earned
+          ? `于 ${e((catalog.earned_at || "").slice(0, 10))} 解锁`
+          : !catalog.available
+            ? "切换到团队空间后查看进度"
+            : catalog.progress == null
+              ? "等待某个意想不到的时刻"
+              : `当前进度 ${catalog.progress} / ${catalog.threshold}`;
+        return `<div class="award-detail">${achievementIcon(catalog, "detail")}<div class="achievement-meta centered"><span>${catalog.ownership === "team" ? "团队" : "个人"}</span><span>${catalog.reveal === "hidden" ? "隐藏彩蛋" : catalog.tone === "reverse_playful" ? "趣味" : "正向"}</span></div><h2>${e(catalog.title)}</h2><p class="small muted">${e(catalog.description)}</p><div class="notice"><b>触发条件</b><br>${e(catalog.trigger)}<br><small>${status}</small></div>${catalog.earned ? '<p class="small muted">荣誉已保存到个人账号；团队变化不会收回已经获得的成就。</p>' : ""}</div>`;
+      }
       return award
         ? `<div class="award-detail">${milestoneIcon(awardKind(award), true, "detail")}<h2>${e(award.title)}</h2><p class="small muted">${e(award.created_at.slice(0, 10))}${award.team_name ? " · " + e(award.team_name) : ""}</p><p class="notice">荣誉已保存到个人账号，不随退出或解散团队而收回。</p></div>`
         : `<div class="award-detail">${milestoneIcon(awardKind(data.id), false, "detail")}<h2>${data.id === "streak_7" ? "连续七天" : data.id === "team_together" ? "同频的一天" : "迈出第一步"}</h2><p class="notice">${data.id === "streak_7" ? "连续完成 7 天个人打卡即可解锁，不要求填写或降低体重。" : data.id === "team_together" ? "至少两位团队成员在同一天全部打卡即可解锁，不要求公开体重。" : "完成首次打卡即可解锁，体重可以留空。"}</p></div>`;
@@ -792,6 +857,11 @@
     }
     if (a === "message-tab") {
       st.messageTab = el.dataset.tab;
+      shell();
+      return;
+    }
+    if (a === "achievement-category") {
+      st.achievementCategory = el.dataset.category;
       shell();
       return;
     }

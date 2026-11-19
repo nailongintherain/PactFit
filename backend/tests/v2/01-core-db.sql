@@ -110,6 +110,6 @@ DO $$ BEGIN
 END $$;
 RESET ROLE;
 SELECT pg_temp.assert(v2_private.visible_length('👩‍👩‍👧‍👦搭子')=3,'common visible Unicode characters');
-SELECT pg_temp.assert((SELECT count(*) FROM public.v2_migrations)=2,'migration reapply idempotent');
+SELECT pg_temp.assert((SELECT count(*) FROM public.v2_migrations)=3,'migration reapply idempotent');
 ROLLBACK;
 SELECT 'PASS core: membership/privacy/approvals/captain/optional-weight/rewards/history/RLS' AS result;

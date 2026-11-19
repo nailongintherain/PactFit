@@ -61,6 +61,8 @@ const response = (data, status = 200) => ({
         return response({ ok: true, data: { space_id: "test-space" } });
       if (url.endsWith("/v2_snapshot"))
         return response({ space: { id: "test-space" } });
+      if (url.endsWith("/v2_achievement_wall"))
+        return response({ total: 60, earned: 0, items: [] });
       if (url.endsWith("/user"))
         return response({
           ...user,
@@ -72,7 +74,8 @@ const response = (data, status = 200) => ({
   await api.login("synthetic@example.invalid", "test-password", true);
   assert.equal(api.hasSession(), true);
   await api.command("bootstrap");
-  await api.snapshot(null);
+  const firstSnapshot = await api.snapshot(null);
+  assert.equal(firstSnapshot.achievement_wall.total, 60);
   await api.logout();
   assert.equal(api.hasSession(), false);
   await api.login("synthetic@example.invalid", "test-password", false);
