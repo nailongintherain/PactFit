@@ -1,10 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 120" preserveAspectRatio="none">
-  <rect x="4" y="4" width="92" height="112" rx="14" fill="none" stroke="#8e392b" stroke-width="7"/>
-  <rect x="8" y="8" width="84" height="104" rx="10" fill="none" stroke="#ed8b70" stroke-width="2"/>
-  <path d="M13 4C26 4 34 12 47 12S69 4 87 4" fill="none" stroke="#f3a084" stroke-width="6" stroke-linecap="round"/>
-  <path d="M13 12C26 12 34 4 47 4S69 12 87 12" fill="none" stroke="#bd4c38" stroke-width="6" stroke-linecap="round"/>
-  <path d="M13 108C26 108 34 116 47 116S69 108 87 108" fill="none" stroke="#bd4c38" stroke-width="6" stroke-linecap="round"/>
-  <path d="M13 116C26 116 34 108 47 108S69 116 87 116" fill="none" stroke="#f3a084" stroke-width="6" stroke-linecap="round"/>
-  <path d="M4 18C12 29 12 39 4 50S4 72 12 83S12 101 4 108" fill="none" stroke="#e4775d" stroke-width="5"/>
-  <path d="M96 18C88 29 88 39 96 50S96 72 88 83S88 101 96 108" fill="none" stroke="#e4775d" stroke-width="5"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 190" preserveAspectRatio="none">
+  <defs><linearGradient id="base" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#d84c35"/><stop offset="1" stop-color="#a93628"/></linearGradient></defs>
+  <rect x="8" y="8" width="144" height="174" rx="25" fill="none" stroke="#7f2c22" stroke-width="20"/>
+  <rect x="8" y="8" width="144" height="174" rx="25" fill="none" stroke="url(#base)" stroke-width="15"/>
+  <rect x="18" y="18" width="124" height="154" rx="17" fill="none" stroke="#8e3024" stroke-width="3"/>
+  <path d="M15 14C27 2 38 26 50 14S73 2 85 14S108 26 120 14S139 3 148 14" fill="none" stroke="#8b2d21" stroke-width="13" stroke-linecap="round"/>
+  <path d="M15 14C27 2 38 26 50 14S73 2 85 14S108 26 120 14S139 3 148 14" fill="none" stroke="#ff9b7d" stroke-width="9" stroke-linecap="round"/>
+  <path d="M15 25C27 37 38 13 50 25S73 37 85 25S108 13 120 25S139 36 148 25" fill="none" stroke="#8b2d21" stroke-width="13" stroke-linecap="round"/>
+  <path d="M15 25C27 37 38 13 50 25S73 37 85 25S108 13 120 25S139 36 148 25" fill="none" stroke="#ffd0b8" stroke-width="9" stroke-linecap="round"/>
+  <path d="M15 165C27 153 38 177 50 165S73 153 85 165S108 177 120 165S139 154 148 165" fill="none" stroke="#8b2d21" stroke-width="13" stroke-linecap="round"/>
+  <path d="M15 165C27 153 38 177 50 165S73 153 85 165S108 177 120 165S139 154 148 165" fill="none" stroke="#ffd0b8" stroke-width="9" stroke-linecap="round"/>
+  <path d="M15 176C27 188 38 164 50 176S73 188 85 176S108 164 120 176S139 187 148 176" fill="none" stroke="#8b2d21" stroke-width="13" stroke-linecap="round"/>
+  <path d="M15 176C27 188 38 164 50 176S73 188 85 176S108 164 120 176S139 187 148 176" fill="none" stroke="#ff9b7d" stroke-width="9" stroke-linecap="round"/>
+  <path d="M8 30C18 39 20 52 17 66" fill="none" stroke="#ffad8d" stroke-width="8" stroke-linecap="round"/>
+  <path d="M152 124C142 138 142 151 150 162" fill="none" stroke="#ffad8d" stroke-width="8" stroke-linecap="round"/>
 </svg>

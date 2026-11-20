@@ -1,8 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 120" preserveAspectRatio="none">
-  <rect x="3.5" y="3.5" width="93" height="113" rx="14" fill="none" stroke="#dc694f" stroke-width="5"/>
-  <rect x="7" y="7" width="86" height="106" rx="10.5" fill="none" stroke="#f4a087" stroke-width="2"/>
-  <path d="M61 116C71 108 82 99 96 91" fill="none" stroke="#873729" stroke-width="7" stroke-linecap="round"/>
-  <path d="M61 116C71 108 82 99 96 91" fill="none" stroke="#df7057" stroke-width="4.5" stroke-linecap="round"/>
-  <path d="M68 109C79 111 89 115 96 118" fill="none" stroke="#873729" stroke-width="7" stroke-linecap="round"/>
-  <path d="M68 109C79 111 89 115 96 118" fill="none" stroke="#f3a084" stroke-width="4.5" stroke-linecap="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 190" preserveAspectRatio="none">
+  <defs>
+    <linearGradient id="outer" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ff8064"/><stop offset="1" stop-color="#d84631"/></linearGradient>
+    <linearGradient id="inner" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#ffab8e"/><stop offset="1" stop-color="#ec6248"/></linearGradient>
+  </defs>
+  <rect x="7" y="7" width="146" height="176" rx="27" fill="none" stroke="#8f3022" stroke-width="18"/>
+  <rect x="7" y="7" width="146" height="176" rx="27" fill="none" stroke="url(#outer)" stroke-width="13"/>
+  <rect x="17" y="17" width="126" height="156" rx="19" fill="none" stroke="#9f3828" stroke-width="5"/>
+  <rect x="18" y="18" width="124" height="154" rx="18" fill="none" stroke="url(#inner)" stroke-width="3"/>
+  <path d="M105 181C117 170 130 155 149 143" fill="none" stroke="#8b2d21" stroke-width="18" stroke-linecap="round"/>
+  <path d="M105 181C117 170 130 155 149 143" fill="none" stroke="#f06a4e" stroke-width="12" stroke-linecap="round"/>
+  <path d="M109 157C123 164 137 175 150 183" fill="none" stroke="#8b2d21" stroke-width="18" stroke-linecap="round"/>
+  <path d="M109 157C123 164 137 175 150 183" fill="none" stroke="#ff9a7c" stroke-width="12" stroke-linecap="round"/>
+  <path d="M121 168C126 164 132 159 138 155" fill="none" stroke="#f06a4e" stroke-width="12" stroke-linecap="round"/>
+  <path d="M114 160L143 179" fill="none" stroke="#ffc0aa" stroke-width="2" stroke-linecap="round" opacity=".65"/>
 </svg>

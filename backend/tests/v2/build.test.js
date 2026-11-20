@@ -59,7 +59,7 @@ try {
     "hidden",
   ]) {
     const frame = fs.readFileSync(path.join(frameDir, rank + ".svg"), "utf8");
-    assert.match(frame, /^<svg[^>]+viewBox="0 0 100 120"/);
+    assert.match(frame, /^<svg[^>]+viewBox="0 0 160 190"/);
     assert.doesNotMatch(frame, /<script|<foreignObject|javascript:/i);
   }
   const app = fs.readFileSync(path.join(output, "app.js"), "utf8");

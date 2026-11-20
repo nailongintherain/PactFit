@@ -1035,6 +1035,24 @@ small,
 .achievement-card.unavailable {
   opacity: 0.66;
 }
+.achievement-card.rank-legendary {
+  padding-top: 29px;
+  padding-bottom: 10px;
+}
+.achievement-card.rank-legendary .achievement-emblem {
+  width: 52px;
+  height: 52px;
+  margin-bottom: 5px;
+}
+.achievement-card.rank-legendary b {
+  margin-top: 4px;
+}
+.achievement-card.rank-legendary > small {
+  margin-top: 1px;
+}
+.achievement-card.rank-legendary .achievement-progress {
+  margin-top: 4px;
+}
 .achievement-card > :not(.achievement-frame) {
   position: relative;
   z-index: 2;

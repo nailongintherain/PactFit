@@ -1,6 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 120" preserveAspectRatio="none">
-  <rect x="3.5" y="3.5" width="93" height="113" rx="14" fill="none" stroke="#e98769" stroke-width="5"/>
-  <rect x="6.5" y="6.5" width="87" height="107" rx="11" fill="none" stroke="#9f4938" stroke-width="1.25"/>
-  <path d="M4 91C8 101 17 109 31 113C24 116 15 117 7 115" fill="none" stroke="#8d3d30" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M4 91C8 101 17 109 31 113C24 116 15 117 7 115" fill="none" stroke="#f3a084" stroke-width="3.8" stroke-linecap="round" stroke-linejoin="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 190" preserveAspectRatio="none">
+  <defs><linearGradient id="band" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ff997c"/><stop offset=".55" stop-color="#ef7055"/><stop offset="1" stop-color="#dc583f"/></linearGradient></defs>
+  <rect x="8" y="8" width="144" height="174" rx="26" fill="none" stroke="#963827" stroke-width="16"/>
+  <rect x="8" y="8" width="144" height="174" rx="26" fill="none" stroke="url(#band)" stroke-width="12"/>
+  <rect x="15" y="15" width="130" height="160" rx="20" fill="none" stroke="#ffb49b" stroke-width="2" opacity=".72"/>
+  <path d="M9 141C9 158 20 176 39 181C34 174 33 165 35 156" fill="none" stroke="#963827" stroke-width="17" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M9 141C9 158 20 176 39 181C34 174 33 165 35 156" fill="none" stroke="url(#band)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M11 145C13 159 21 171 33 176" fill="none" stroke="#ffc0aa" stroke-width="2" stroke-linecap="round" opacity=".75"/>
+  <path d="M34 157V176" fill="none" stroke="#b84733" stroke-width="2" opacity=".7"/>
 </svg>
