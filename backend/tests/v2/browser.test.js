@@ -271,6 +271,13 @@ async function snapshot(email, space = null) {
       );
     assert.equal(await a.locator("svg.achievement-frame").count(), 0);
     assert.equal(await a.locator(".achievement-frame i").count(), 0);
+    assert.equal(await a.locator(".achievement-card .achievement-progress").count(), 0);
+    assert.equal(await a.locator(".achievement-card .achievement-meta").count(), 0);
+    assert.equal(await a.locator(".achievement-card .achievement-copy").count(), 14);
+    assert.match(
+      await a.locator('.achievement-card[data-id="first_checkin"]').innerText(),
+      /第一次出现，就已经算数/,
+    );
     assert.ok(
       await a.locator("img.achievement-frame").evaluateAll((frames) =>
         frames.every(
@@ -284,6 +291,35 @@ async function snapshot(email, space = null) {
         .count(),
       1,
     );
+    const categoryGlyphs = {
+      start_return: "journey",
+      record_streak: "footprints",
+      weight_journey: "scale",
+      goals_promises: "knot",
+      buddy_collaboration: "buddy",
+      surprises: "spark",
+    };
+    for (const [category, glyph] of Object.entries(categoryGlyphs)) {
+      await action(
+        a,
+        "achievement-category",
+        `[data-category="${category}"]`,
+      );
+      const visible = await a.locator(".achievement-card:not(.rank-hidden)").count();
+      assert.equal(
+        await a
+          .locator(
+            `.achievement-card:not(.rank-hidden) .achievement-emblem[data-achievement-category="${category}"][data-glyph="${glyph}"]`,
+          )
+          .count(),
+        visible,
+      );
+    }
+    await action(
+      a,
+      "achievement-category",
+      '[data-category="start_return"]',
+    );
     if (process.env.V2_SCREENSHOT_DIR) {
       await a.locator("#toast").evaluate((node) => {
         node.dataset.previewDisplay = node.style.display;
@@ -296,6 +332,19 @@ async function snapshot(email, space = null) {
       await a.locator(".achievement-section").screenshot({
         path: process.env.V2_SCREENSHOT_DIR + "/v2-achievement-svg-frames.png",
       });
+      await action(
+        a,
+        "achievement-category",
+        '[data-category="record_streak"]',
+      );
+      await a.locator(".achievement-section").screenshot({
+        path: process.env.V2_SCREENSHOT_DIR + "/v2-achievement-record-icons.png",
+      });
+      await action(
+        a,
+        "achievement-category",
+        '[data-category="start_return"]',
+      );
       await a.locator(".bottom-nav").evaluate((node) => {
         node.style.display = node.dataset.previewDisplay || "";
         delete node.dataset.previewDisplay;
@@ -312,7 +361,7 @@ async function snapshot(email, space = null) {
     );
     assert.match(
       await a.locator('.achievement-card[data-id="weight_up_1"]').innerText(),
-      /神秘成就|等待偶遇/,
+      /神秘成就|意想不到/,
     );
     assert.equal(
       await a.locator('.achievement-card[data-id="weight_up_1"].rank-hidden .frame-hidden').count(),

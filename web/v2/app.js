@@ -87,17 +87,26 @@
     return "other";
   }
   function achievementIcon(item, size = "") {
-    const kind = item.icon || "mystery";
-    const icons = {
-      journey: "arrow",
-      record: "check",
-      weight: "trend",
-      goal: "spark",
-      buddy: "users",
-      surprise: "spark",
-      mystery: "lock",
+    const categoryGlyphs = {
+      start_return: "journey",
+      record_streak: "footprints",
+      weight_journey: "scale",
+      goals_promises: "knot",
+      buddy_collaboration: "buddy",
+      surprises: "spark",
     };
-    return `<span class="achievement-emblem emblem-${kind} ${item.earned ? "earned" : "locked"} ${size}" aria-hidden="true">${icon(icons[kind] || "spark", size === "detail" ? 42 : 27)}</span>`;
+    const hidden = item.icon === "mystery" || item.rank === "hidden";
+    const kind = hidden ? "mystery" : categoryGlyphs[item.category] || "spark";
+    const glyphs = {
+      journey: `<path d="M13 42h26M30 31l11 11-11 11"/><path d="M15 21v42"/>`,
+      footprints: `<g fill="currentColor" stroke="none"><ellipse cx="23" cy="42" rx="8" ry="13" transform="rotate(-18 23 42)"/><circle cx="15" cy="24" r="3.2"/><circle cx="21" cy="20" r="3.5"/><circle cx="28" cy="20" r="3"/><circle cx="34" cy="23" r="2.6"/><ellipse cx="48" cy="31" rx="8" ry="13" transform="rotate(18 48 31)"/><circle cx="39" cy="14" r="2.6"/><circle cx="45" cy="11" r="3"/><circle cx="52" cy="12" r="3.5"/><circle cx="58" cy="17" r="3.2"/></g>`,
+      scale: `<path d="M18 56 13 28c-1-8 4-13 12-13h30c8 0 13 5 12 13l-5 28c-1 6-5 9-11 9H29c-6 0-10-3-11-9Z"/><path d="M22 35c2-10 8-15 18-15s16 5 18 15H22Z"/><path d="M40 35 37 26l3-6 3 6-3 9Z"/>`,
+      knot: `<path d="m11 50 20-22 14 13-20 22-14-13Z"/><path d="m38 37 17-22 14 12-19 23-12-13Z"/><path d="M22 27c7-7 14-7 21 0l10 10c5 5 3 13-3 17-5 3-10 2-14-2L22 40c-4-4-4-9 0-13Zm36 22c-7 7-14 7-21 0l-10-10c-5-5-3-13 3-17 5-3 10-2 14 2l14 12c4 4 4 9 0 13Z"/>`,
+      buddy: `<circle cx="28" cy="27" r="8"/><circle cx="52" cy="27" r="8"/><path d="M13 59c1-13 6-20 15-20s14 7 15 20M37 59c1-13 6-20 15-20s14 7 15 20"/>`,
+      spark: `<path d="m40 9 7 18 18 7-18 7-7 20-7-20-18-7 18-7 7-18Z"/><path d="m61 10 2 6 6 2-6 2-2 6-2-6-6-2 6-2 2-6Z"/>`,
+      mystery: `<rect x="18" y="31" width="44" height="36" rx="7"/><path d="M27 31V21c0-9 5-14 13-14s13 5 13 14v10"/><circle cx="40" cy="49" r="3"/>`,
+    };
+    return `<span class="achievement-emblem emblem-${kind} ${item.earned ? "earned" : "locked"} ${size}" data-achievement-category="${e(item.category || "hidden")}" data-glyph="${kind}" aria-hidden="true"><svg viewBox="0 0 80 80" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">${glyphs[kind]}</svg></span>`;
   }
   const achievementRanks = {
     starter: "入门",
@@ -433,19 +442,8 @@
       .join("")}</div>`;
     const cards = items
       .map((item) => {
-        const status = item.earned
-          ? "已解锁"
-          : !item.available
-            ? "进入团队查看"
-            : item.progress == null
-              ? "等待偶遇"
-              : `${item.progress} / ${item.threshold}`;
-        const progress =
-          !item.earned && item.progress != null && item.threshold
-            ? `<span class="achievement-progress"><i style="width:${Math.min(100, (item.progress / item.threshold) * 100)}%"></i></span>`
-            : "";
         const rank = item.rank || "starter";
-        return `<button class="achievement-card rank-${rank} ${item.earned ? "earned" : "locked"} ${item.available ? "" : "unavailable"}" data-action="award-detail" data-id="${e(item.code)}">${achievementFrame(rank)}${achievementIcon(item)}<span class="achievement-meta"><span>${item.ownership === "team" ? "团队" : "个人"}</span><span class="rank-label">${achievementRanks[rank]}</span></span><b>${e(item.title)}</b><small>${e(status)}</small>${progress}</button>`;
+        return `<button class="achievement-card rank-${rank} ${item.earned ? "earned" : "locked"} ${item.available ? "" : "unavailable"}" data-action="award-detail" data-id="${e(item.code)}" aria-label="${e(item.title)}，${e(item.description)}">${achievementFrame(rank)}${achievementIcon(item)}<b>${e(item.title)}</b><span class="achievement-divider" aria-hidden="true"></span><small class="achievement-copy">${e(item.description)}</small></button>`;
       })
       .join("");
     return (
