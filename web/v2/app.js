@@ -99,6 +99,17 @@
     };
     return `<span class="achievement-emblem emblem-${kind} ${item.earned ? "earned" : "locked"} ${size}" aria-hidden="true">${icon(icons[kind] || "spark", size === "detail" ? 42 : 27)}</span>`;
   }
+  const achievementRanks = {
+    starter: "入门",
+    advanced: "进阶",
+    rare: "稀有",
+    epic: "史诗",
+    legendary: "传奇",
+    hidden: "未揭晓",
+  };
+  function achievementFrame(rank) {
+    return `<span class="achievement-frame frame-${rank}" aria-hidden="true"><i></i><i></i><i></i></span>`;
+  }
   let api, toastTimer;
   const st = {
     data: null,
@@ -424,7 +435,8 @@
           !item.earned && item.progress != null && item.threshold
             ? `<span class="achievement-progress"><i style="width:${Math.min(100, (item.progress / item.threshold) * 100)}%"></i></span>`
             : "";
-        return `<button class="achievement-card ${item.earned ? "earned" : "locked"} ${item.available ? "" : "unavailable"}" data-action="award-detail" data-id="${e(item.code)}">${achievementIcon(item)}<span class="achievement-meta"><span>${item.ownership === "team" ? "团队" : "个人"}</span><span>${item.reveal === "hidden" ? "彩蛋" : item.tone === "reverse_playful" ? "趣味" : "正向"}</span></span><b>${e(item.title)}</b><small>${e(status)}</small>${progress}</button>`;
+        const rank = item.rank || "starter";
+        return `<button class="achievement-card rank-${rank} ${item.earned ? "earned" : "locked"} ${item.available ? "" : "unavailable"}" data-action="award-detail" data-id="${e(item.code)}">${achievementFrame(rank)}${achievementIcon(item)}<span class="achievement-meta"><span>${item.ownership === "team" ? "团队" : "个人"}</span><span class="rank-label">${achievementRanks[rank]}</span></span><b>${e(item.title)}</b><small>${e(status)}</small>${progress}</button>`;
       })
       .join("");
     return (
@@ -604,7 +616,8 @@
             : catalog.progress == null
               ? "等待某个意想不到的时刻"
               : `当前进度 ${catalog.progress} / ${catalog.threshold}`;
-        return `<div class="award-detail">${achievementIcon(catalog, "detail")}<div class="achievement-meta centered"><span>${catalog.ownership === "team" ? "团队" : "个人"}</span><span>${catalog.reveal === "hidden" ? "隐藏彩蛋" : catalog.tone === "reverse_playful" ? "趣味" : "正向"}</span></div><h2>${e(catalog.title)}</h2><p class="small muted">${e(catalog.description)}</p><div class="notice"><b>触发条件</b><br>${e(catalog.trigger)}<br><small>${status}</small></div>${catalog.earned ? '<p class="small muted">荣誉已保存到个人账号；团队变化不会收回已经获得的成就。</p>' : ""}</div>`;
+        const rank = catalog.rank || "starter";
+        return `<div class="award-detail rank-${rank}"><div class="achievement-detail-frame">${achievementFrame(rank)}${achievementIcon(catalog, "detail")}</div><div class="achievement-meta centered"><span>${catalog.ownership === "team" ? "团队" : "个人"}</span><span class="rank-label">${achievementRanks[rank]}</span></div><h2>${e(catalog.title)}</h2><p class="small muted">${e(catalog.description)}</p><div class="notice"><b>触发条件</b><br>${e(catalog.trigger)}<br><small>${status}</small></div>${catalog.earned ? '<p class="small muted">荣誉已保存到个人账号；团队变化不会收回已经获得的成就。</p>' : ""}</div>`;
       }
       return award
         ? `<div class="award-detail">${milestoneIcon(awardKind(award), true, "detail")}<h2>${e(award.title)}</h2><p class="small muted">${e(award.created_at.slice(0, 10))}${award.team_name ? " · " + e(award.team_name) : ""}</p><p class="notice">荣誉已保存到个人账号，不随退出或解散团队而收回。</p></div>`

@@ -34,7 +34,7 @@ git switch feat/pactfit-v2-product-redesign
 
 伙伴图标只使用服务端返回的当天打卡状态：未记录为困倦、我已记录为清醒加状态点、我已记录且至少一位当前搭子也已记录为笑脸。它不读取体重变化，也不暴露搭子的健康数据；关闭动态后始终显示默认表情。此设置仅控制应用内图标，不承诺改变手机系统桌面上的 PWA 图标。
 
-成就墙按“启程与回归、记录与坚持、体重旅程、目标与约定、搭子协作、意外与彩蛋”六类组织，每类 10 项。个人／团队、正向／趣味、公开／隐藏是成就属性，不另拆类别。锁定与达成样式由真实服务端进度决定；隐藏项在未解锁前连名称、条件和阈值都不会返回给前端。体重波动类只使用中性或调皮表达，不定义失败或惩罚。
+成就墙按“启程与回归、记录与坚持、体重旅程、目标与约定、搭子协作、意外与彩蛋”六类组织，每类 14 项，共 84 项。个人／团队、正向／趣味、公开／隐藏是成就属性，不另拆类别。五级边框为入门、进阶、稀有、史诗、传奇，使用同一条暖色织带逐级增加编织复杂度。锁定与达成样式由真实服务端进度决定；隐藏项在未解锁前连名称、等级、条件和阈值都不会返回给前端。体重波动类只使用中性或调皮表达，不定义失败或惩罚。
 
 跨账号变化在下一次服务端请求立即按新权限过滤；前端提供刷新按钮、窗口激活刷新和 20 秒轮询。Preview 未接入 Realtime 推送，不能承诺其他浏览器零延迟刷新。
 
@@ -47,6 +47,7 @@ git switch feat/pactfit-v2-product-redesign
 - `db/migrations/03-v2-preview.sql`：增量且可重复的 V2 业务迁移，全部使用 v2_ 前缀，不更改旧表或托管 auth。
 - `db/migrations/04-v2-reward-claims.sql`：冻结已批准的 Preview 奖励领取，避免跨团队重复获得宝石。
 - `db/migrations/05-v2-achievement-wall.sql`：六类共 60 项成就目录、服务端触发计算、隐藏彩蛋遮蔽和团队荣誉归档；新增项目默认不附带宝石。
+- `db/migrations/06-v2-achievement-tiers.sql`：将审核后的目录扩展为六类共 84 项，加入五级边框、长期月份／周数／回归和团队同行指标；隐藏项未解锁前同时遮蔽等级。
 - `public.v2_command`：服务端允许的业务动作；`public.v2_snapshot`：按身份和当前空间过滤的数据投影。
 - 私人健康记录统一存储于 v2_daily；v2_checkins 保存各空间的状态/清单；v2_sharing 保存每个团队独立、默认关闭的授权。
 - 基础表启用 RLS，业务直写全部撤销；仅自己的 daily 和 ledger 可直接 SELECT。其他成员数据仅经受控 RPC 返回。
@@ -68,7 +69,7 @@ v2_catalog 提供空间名额、团队席位、装饰商品结构。默认价格
 
 ## 独立 Cloudflare/Supabase 预览配置
 
-在**新建、独立**的 Supabase 项目 SQL Editor 依次执行 `db/migrations/03-v2-preview.sql`、`db/migrations/04-v2-reward-claims.sql`、`db/migrations/05-v2-achievement-wall.sql`，不要执行 `v2/roles.sql`（仅限本地）。开启 Data API 的 public schema，保留托管 auth。生产式邮箱验证/SMTP 按该新项目单独设置。
+在**新建、独立**的 Supabase 项目 SQL Editor 依次执行 `db/migrations/03-v2-preview.sql`、`db/migrations/04-v2-reward-claims.sql`、`db/migrations/05-v2-achievement-wall.sql`、`db/migrations/06-v2-achievement-tiers.sql`，不要执行 `v2/roles.sql`（仅限本地）。开启 Data API 的 public schema，保留托管 auth。生产式邮箱验证/SMTP 按该新项目单独设置。
 
 编辑 `v2/wrangler.toml` 的三个公开变量：
 

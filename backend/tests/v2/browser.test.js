@@ -262,9 +262,13 @@ async function snapshot(email, space = null) {
     await a.locator('[data-today-state="together"]').waitFor();
     await setPage(a, "achievements");
     assert.equal(await a.locator(".achievement-tabs button").count(), 6);
-    assert.equal(await a.locator(".achievement-card").count(), 10);
+    assert.equal(await a.locator(".achievement-card").count(), 14);
+    for (const rank of ["starter", "advanced", "rare", "epic", "legendary"])
+      assert.ok(await a.locator(`.achievement-card.rank-${rank} .frame-${rank}`).count());
     assert.equal(
-      await a.locator('.achievement-card[data-id="first_checkin"].earned').count(),
+      await a
+        .locator('.achievement-card[data-id="first_checkin"].earned.rank-starter .frame-starter')
+        .count(),
       1,
     );
     await action(
@@ -274,7 +278,11 @@ async function snapshot(email, space = null) {
     );
     assert.match(
       await a.locator('.achievement-card[data-id="weight_up_1"]').innerText(),
-      /隐藏彩蛋|等待偶遇/,
+      /神秘成就|等待偶遇/,
+    );
+    assert.equal(
+      await a.locator('.achievement-card[data-id="weight_up_1"].rank-hidden .frame-hidden').count(),
+      1,
     );
     assert.doesNotMatch(
       await a.locator('.achievement-card[data-id="weight_up_1"]').innerText(),
@@ -286,7 +294,7 @@ async function snapshot(email, space = null) {
       '[data-category="buddy_collaboration"]',
     );
     assert.equal(
-      await a.locator('.achievement-card[data-id="team_together"].earned').count(),
+      await a.locator('.achievement-card[data-id="team_together"].earned.rank-advanced').count(),
       1,
     );
     await action(a, "award-detail", '[data-id="team_together"]');

@@ -12,7 +12,7 @@ done
 if [ "$ready" != true ]; then docker logs "$container"; exit 1; fi
 docker exec -i "$container" psql -h 127.0.0.1 -U postgres -v ON_ERROR_STOP=1 < backend/tests/v2/bootstrap.sql >/dev/null
 for repetition in 1 2; do
- for migration in db/migrations/0[3-5]-v2-*.sql; do
+ for migration in db/migrations/0[3-6]-v2-*.sql; do
   docker exec -i "$container" psql -h 127.0.0.1 -U postgres -v ON_ERROR_STOP=1 < "$migration" >/dev/null
  done
 done
