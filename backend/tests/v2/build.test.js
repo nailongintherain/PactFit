@@ -49,6 +49,22 @@ try {
   );
   for (const file of ["app.js", "model.js", "api.js", "style.css"])
     assert.ok(fs.existsSync(path.join(output, file)));
+  const frameDir = path.join(output, "assets/achievement-frames");
+  for (const rank of [
+    "starter",
+    "advanced",
+    "rare",
+    "epic",
+    "legendary",
+    "hidden",
+  ]) {
+    const frame = fs.readFileSync(path.join(frameDir, rank + ".svg"), "utf8");
+    assert.match(frame, /^<svg[^>]+viewBox="0 0 100 120"/);
+    assert.doesNotMatch(frame, /<script|<foreignObject|javascript:/i);
+  }
+  const app = fs.readFileSync(path.join(output, "app.js"), "utf8");
+  assert.match(app, /assets\/achievement-frames\/legendary\.svg/);
+  assert.doesNotMatch(app, /<svg class="achievement-frame"/);
   const style = fs.readFileSync(path.join(output, "style.css"), "utf8");
   assert.match(style, /--phone-width:\s*430px/);
   assert.match(style, /width:\s*min\(100%,\s*var\(--phone-width\)\)/);

@@ -266,14 +266,18 @@ async function snapshot(email, space = null) {
     for (const rank of ["starter", "advanced", "rare", "epic", "legendary"])
       assert.ok(
         await a
-          .locator(`.achievement-card.rank-${rank} svg.frame-${rank}[data-frame-rank="${rank}"]`)
+          .locator(`.achievement-card.rank-${rank} img.frame-${rank}[data-frame-rank="${rank}"][src$="/${rank}.svg"]`)
           .count(),
       );
+    assert.equal(await a.locator("svg.achievement-frame").count(), 0);
     assert.equal(await a.locator(".achievement-frame i").count(), 0);
-    assert.ok(await a.locator("svg.frame-advanced path").count());
-    assert.ok((await a.locator("svg.frame-rare path").count()) >= 2);
-    assert.ok((await a.locator("svg.frame-epic path").count()) >= 6);
-    assert.ok((await a.locator("svg.frame-legendary path").count()) >= 10);
+    assert.ok(
+      await a.locator("img.achievement-frame").evaluateAll((frames) =>
+        frames.every(
+          (frame) => frame.complete && frame.naturalWidth > 0 && frame.naturalHeight > 0,
+        ),
+      ),
+    );
     assert.equal(
       await a
         .locator('.achievement-card[data-id="first_checkin"].earned.rank-starter .frame-starter')
