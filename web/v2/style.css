@@ -1043,105 +1043,13 @@ small,
   position: absolute;
   z-index: 1;
   inset: 0;
+  width: 100%;
+  height: 100%;
   border-radius: inherit;
+  overflow: visible;
   pointer-events: none;
 }
-.achievement-frame i {
-  display: none;
-  position: absolute;
-  border: 1px solid #7b3026;
-  border-radius: 99px;
-}
-.frame-starter {
-  border: 2px solid #d8bca5;
-  box-shadow: inset 0 0 0 1px #fff8ef;
-}
-.frame-advanced {
-  border: 6px solid #f19a7e;
-  box-shadow: inset 0 0 0 2px #bd5c47;
-}
-.frame-advanced i:first-child {
-  display: block;
-  bottom: 1px;
-  left: 18px;
-  width: 32px;
-  height: 10px;
-  background: #f19a7e;
-  transform: rotate(-2deg);
-}
-.frame-rare {
-  border: 8px double #e46f55;
-  box-shadow: inset 0 0 0 1px #8f3c2b;
-}
-.frame-rare i:first-child,
-.frame-rare i:nth-child(2) {
-  display: block;
-  right: 5px;
-  bottom: 8px;
-  width: 34px;
-  height: 10px;
-  background: #e46f55;
-}
-.frame-rare i:first-child { transform: rotate(34deg); }
-.frame-rare i:nth-child(2) {
-  right: 1px;
-  bottom: 3px;
-  background: #f19a7e;
-  transform: rotate(-42deg);
-}
-.frame-epic {
-  border: 9px solid transparent;
-  background:
-    linear-gradient(var(--bg), var(--bg)) padding-box,
-    repeating-linear-gradient(135deg, #8f3c2b 0 10px, #b84a34 10px 20px, #f19a7e 20px 30px, #b84a34 30px 40px) border-box;
-  box-shadow: inset 0 0 0 2px #7b3026, 0 0 0 1px #9d3e2e;
-}
-.frame-epic i:first-child,
-.frame-epic i:nth-child(2) {
-  display: block;
-  left: 18px;
-  width: calc(100% - 36px);
-  height: 8px;
-  border: 0;
-  background: repeating-linear-gradient(90deg, #f7b098 0 13px, #9d3e2e 13px 26px);
-}
-.frame-epic i:first-child { top: 2px; }
-.frame-epic i:nth-child(2) { bottom: 2px; }
-.frame-legendary {
-  border: 11px solid transparent;
-  background:
-    linear-gradient(var(--bg), var(--bg)) padding-box,
-    repeating-linear-gradient(135deg, #7b3026 0 11px, #b84a34 11px 22px, #f19a7e 22px 33px, #f4b64f 33px 40px, #7b3026 40px 51px) border-box;
-  box-shadow: inset 0 0 0 2px #64251e, 0 0 0 2px #8f3c2b;
-}
-.frame-legendary i {
-  display: block;
-  top: -7px;
-  left: 50%;
-  width: 42px;
-  height: 11px;
-  transform-origin: center;
-}
-.frame-legendary i:first-child {
-  margin-left: -35px;
-  background: #b84a34;
-  transform: rotate(25deg);
-}
-.frame-legendary i:nth-child(2) {
-  z-index: 2;
-  margin-left: -21px;
-  background: #f19a7e;
-  transform: rotate(-25deg);
-}
-.frame-legendary i:nth-child(3) {
-  z-index: 3;
-  margin-left: -7px;
-  background: #f4b64f;
-  transform: rotate(25deg);
-}
 .frame-hidden {
-  border: 3px solid #b9aaa2;
-  box-shadow: inset 0 0 0 2px #eee3db;
   opacity: 0.7;
 }
 .achievement-card b,

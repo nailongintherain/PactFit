@@ -107,8 +107,51 @@
     legendary: "传奇",
     hidden: "未揭晓",
   };
+  const achievementFrameSvg = {
+    starter: `
+      <rect x="3" y="3" width="94" height="114" rx="14" fill="none" stroke="#d8bca5" stroke-width="2"/>
+      <rect x="5.5" y="5.5" width="89" height="109" rx="12" fill="none" stroke="#fff8ef" stroke-width="1"/>`,
+    advanced: `
+      <rect x="3.5" y="3.5" width="93" height="113" rx="14" fill="none" stroke="#e98769" stroke-width="5"/>
+      <rect x="6.5" y="6.5" width="87" height="107" rx="11" fill="none" stroke="#9f4938" stroke-width="1.25"/>
+      <path d="M4 91 C8 101 17 109 31 113 C24 116 15 117 7 115" fill="none" stroke="#8d3d30" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M4 91 C8 101 17 109 31 113 C24 116 15 117 7 115" fill="none" stroke="#f3a084" stroke-width="3.8" stroke-linecap="round" stroke-linejoin="round"/>`,
+    rare: `
+      <rect x="3.5" y="3.5" width="93" height="113" rx="14" fill="none" stroke="#dc694f" stroke-width="5"/>
+      <rect x="7" y="7" width="86" height="106" rx="10.5" fill="none" stroke="#f4a087" stroke-width="2"/>
+      <path d="M61 116 C71 108 82 99 96 91" fill="none" stroke="#873729" stroke-width="7" stroke-linecap="round"/>
+      <path d="M61 116 C71 108 82 99 96 91" fill="none" stroke="#df7057" stroke-width="4.5" stroke-linecap="round"/>
+      <path d="M68 109 C79 111 89 115 96 118" fill="none" stroke="#873729" stroke-width="7" stroke-linecap="round"/>
+      <path d="M68 109 C79 111 89 115 96 118" fill="none" stroke="#f3a084" stroke-width="4.5" stroke-linecap="round"/>`,
+    epic: `
+      <rect x="4" y="4" width="92" height="112" rx="14" fill="none" stroke="#8e392b" stroke-width="7"/>
+      <rect x="8" y="8" width="84" height="104" rx="10" fill="none" stroke="#ed8b70" stroke-width="2"/>
+      <path d="M13 4 C26 4 34 12 47 12 S69 4 87 4" fill="none" stroke="#f3a084" stroke-width="6" stroke-linecap="round"/>
+      <path d="M13 12 C26 12 34 4 47 4 S69 12 87 12" fill="none" stroke="#bd4c38" stroke-width="6" stroke-linecap="round"/>
+      <path d="M13 108 C26 108 34 116 47 116 S69 108 87 108" fill="none" stroke="#bd4c38" stroke-width="6" stroke-linecap="round"/>
+      <path d="M13 116 C26 116 34 108 47 108 S69 116 87 116" fill="none" stroke="#f3a084" stroke-width="6" stroke-linecap="round"/>
+      <path d="M4 18 C12 29 12 39 4 50 S4 72 12 83 S12 101 4 108" fill="none" stroke="#e4775d" stroke-width="5"/>
+      <path d="M96 18 C88 29 88 39 96 50 S96 72 88 83 S88 101 96 108" fill="none" stroke="#e4775d" stroke-width="5"/>`,
+    legendary: `
+      <rect x="4" y="4" width="92" height="112" rx="14" fill="none" stroke="#6f2b23" stroke-width="8"/>
+      <rect x="8" y="8" width="84" height="104" rx="10" fill="none" stroke="#f0a080" stroke-width="2"/>
+      <path d="M11 5 C24 5 32 14 46 14 S69 5 89 5" fill="none" stroke="#e07054" stroke-width="6" stroke-linecap="round"/>
+      <path d="M11 13 C24 13 32 5 46 5 S69 13 89 13" fill="none" stroke="#f4b64f" stroke-width="6" stroke-linecap="round"/>
+      <path d="M11 107 C24 107 32 115 46 115 S69 107 89 107" fill="none" stroke="#f4b64f" stroke-width="6" stroke-linecap="round"/>
+      <path d="M11 115 C24 115 32 107 46 107 S69 115 89 115" fill="none" stroke="#e07054" stroke-width="6" stroke-linecap="round"/>
+      <path d="M5 17 C14 28 14 39 5 50 S5 72 14 83 S14 101 5 109" fill="none" stroke="#d45e47" stroke-width="6"/>
+      <path d="M13 17 C5 28 5 39 13 50 S13 72 5 83 S5 101 13 109" fill="none" stroke="#f0a080" stroke-width="5"/>
+      <path d="M95 17 C86 28 86 39 95 50 S95 72 86 83 S86 101 95 109" fill="none" stroke="#d45e47" stroke-width="6"/>
+      <path d="M87 17 C95 28 95 39 87 50 S87 72 95 83 S95 101 87 109" fill="none" stroke="#f0a080" stroke-width="5"/>
+      <path d="M30 8 C35 0 43 0 50 8 C57 0 65 0 70 8 C63 12 57 15 50 19 C43 15 37 12 30 8 Z" fill="#f3a084" stroke="#6f2b23" stroke-width="1.4" stroke-linejoin="round"/>
+      <path d="M34 4 C40 9 45 12 50 18 C55 12 60 9 66 4" fill="none" stroke="#f4b64f" stroke-width="4" stroke-linecap="round"/>`,
+    hidden: `
+      <rect x="3" y="3" width="94" height="114" rx="14" fill="none" stroke="#b9aaa2" stroke-width="3"/>
+      <rect x="6" y="6" width="88" height="108" rx="11" fill="none" stroke="#eee3db" stroke-width="2"/>`,
+  };
   function achievementFrame(rank) {
-    return `<span class="achievement-frame frame-${rank}" aria-hidden="true"><i></i><i></i><i></i></span>`;
+    const safeRank = achievementFrameSvg[rank] ? rank : "hidden";
+    return `<svg class="achievement-frame frame-${safeRank}" data-frame-rank="${safeRank}" viewBox="0 0 100 120" preserveAspectRatio="none" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">${achievementFrameSvg[safeRank]}</svg>`;
   }
   let api, toastTimer;
   const st = {

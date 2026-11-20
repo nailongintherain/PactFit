@@ -264,13 +264,43 @@ async function snapshot(email, space = null) {
     assert.equal(await a.locator(".achievement-tabs button").count(), 6);
     assert.equal(await a.locator(".achievement-card").count(), 14);
     for (const rank of ["starter", "advanced", "rare", "epic", "legendary"])
-      assert.ok(await a.locator(`.achievement-card.rank-${rank} .frame-${rank}`).count());
+      assert.ok(
+        await a
+          .locator(`.achievement-card.rank-${rank} svg.frame-${rank}[data-frame-rank="${rank}"]`)
+          .count(),
+      );
+    assert.equal(await a.locator(".achievement-frame i").count(), 0);
+    assert.ok(await a.locator("svg.frame-advanced path").count());
+    assert.ok((await a.locator("svg.frame-rare path").count()) >= 2);
+    assert.ok((await a.locator("svg.frame-epic path").count()) >= 6);
+    assert.ok((await a.locator("svg.frame-legendary path").count()) >= 10);
     assert.equal(
       await a
         .locator('.achievement-card[data-id="first_checkin"].earned.rank-starter .frame-starter')
         .count(),
       1,
     );
+    if (process.env.V2_SCREENSHOT_DIR) {
+      await a.locator("#toast").evaluate((node) => {
+        node.dataset.previewDisplay = node.style.display;
+        node.style.display = "none";
+      });
+      await a.locator(".bottom-nav").evaluate((node) => {
+        node.dataset.previewDisplay = node.style.display;
+        node.style.display = "none";
+      });
+      await a.locator(".achievement-section").screenshot({
+        path: process.env.V2_SCREENSHOT_DIR + "/v2-achievement-svg-frames.png",
+      });
+      await a.locator(".bottom-nav").evaluate((node) => {
+        node.style.display = node.dataset.previewDisplay || "";
+        delete node.dataset.previewDisplay;
+      });
+      await a.locator("#toast").evaluate((node) => {
+        node.style.display = node.dataset.previewDisplay || "";
+        delete node.dataset.previewDisplay;
+      });
+    }
     await action(
       a,
       "achievement-category",
